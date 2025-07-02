@@ -44,3 +44,5 @@ htmlcov/
 test/
 old/
 trainer/
+build.bat
+*.spec

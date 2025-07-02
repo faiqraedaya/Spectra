@@ -6,7 +6,7 @@ from pathlib import Path
 
 # Application metadata
 APP_NAME = "Spectra"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.0.0"
 APP_TITLE = f"{APP_NAME} V{APP_VERSION}"
 
 # Window settings

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QVBoxLayout,
+    QWidget
 )
 
 from ui.pdf_viewer import PDFViewer
@@ -31,7 +32,7 @@ class ViewerPanel:
         
     def create_panel(self):
         """Create the viewer panel with PDF viewer and navigation controls"""
-        viewer_panel = QGroupBox("Viewer")
+        viewer_panel = QWidget() #QGroupBox("Viewer")
         viewer_layout = QVBoxLayout()
         viewer_panel.setLayout(viewer_layout)
 

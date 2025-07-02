@@ -24,7 +24,6 @@ class RoboflowAnalysisThread(QThread):
             rf = Roboflow(api_key=self.api_key)
             project = rf.workspace().project("schemas")
             model = project.version(1).model
-            print("API loaded, running...")
             
             all_detections = []
             

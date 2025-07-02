@@ -116,7 +116,7 @@ class PDFViewer(QLabel):
             self.update_display()
             
         except Exception as e:
-            print(f"Error rendering page: {e}")
+            QMessageBox.critical(None, "Error Rendering Page", f"Error rendering page: {e}")
         
     def set_page(self, page_num: int):
         """Set current page (0-indexed)"""
@@ -260,7 +260,6 @@ class PDFViewer(QLabel):
                 else:
                     adj_pos = event.pos()
                 handle = self.handle_at_pos(adj_pos, (x1, y1, x2, y2))
-                print(f"[DEBUG] mousePressEvent: pos={event.pos()}, adj_pos={adj_pos}, bbox={x1,y1,x2,y2}, handle={handle}")
                 if handle:
                     self.resizing = True
                     self.resize_handle = handle
@@ -473,7 +472,7 @@ class PDFViewer(QLabel):
                 pil_image.save(temp_path)
                 image_paths.append(temp_path)
             except Exception as e:
-                print(f"Error converting page {page_num}: {e}")
+                QMessageBox.critical(None, "Error Converting Page", f"Error converting page {page_num}: {e}")
         return image_paths
     
     def cleanup(self):
