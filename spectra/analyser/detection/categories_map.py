@@ -75,7 +75,6 @@ def get_frequency_category(object_type):
     for cat in FREQUENCY_CATEGORIES:
         if key == cat.strip().lower():
             return cat
-    print(f"[DEBUG] get_frequency_category: No mapping for '{object_type}' (key: '{key}')", flush=True)
     return None
 
 def get_all_frequency_categories():

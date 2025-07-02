@@ -37,7 +37,7 @@ class Spectra(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
         self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
-        self.version = "0.1.0"
+        self.version = "1.1.0"
 
         # Initialize variables
         if os.getenv(ROBOFLOW_API_KEY_ENV):
@@ -316,7 +316,6 @@ class Spectra(QMainWindow):
             self,
             "About",
             "Spectra\n"
-            "Object Detection and Isolatable-section Navigator\n"
             f"Version {self.version}\n"
             "© Faiq Raedaya 2025",
         )
@@ -339,20 +338,6 @@ class Spectra(QMainWindow):
             "- Ctrl+Scroll: Zoom in/out (centered on mouse cursor)\n"
             "- Shift+Scroll: Pan left/right horizontally\n"
             "- Scroll: Pan up/down vertically",
-        )
-
-    def show_changelog(self):
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.information(
-            self,
-            "Changelog",
-            "Version 0.1.0:\n"
-            "- Initial release\n"
-            "- PDF viewing and navigation\n"
-            "- Object detection with Roboflow API\n"
-            "- Manual object annotation\n"
-            "- Section management\n"
-            "- Export functionality",
         )
 
     def export_results_to_csv(self):

@@ -130,10 +130,6 @@ class MenuManager:
         about_action.triggered.connect(self.main_window.show_about)
         about_menu_obj.addAction(about_action)
 
-        changelog_action = QAction("Changelog", self.main_window)
-        changelog_action.triggered.connect(self.main_window.show_changelog)
-        about_menu_obj.addAction(changelog_action)
-
         help_action = QAction("Help", self.main_window)
         help_action.triggered.connect(self.main_window.show_help)
         about_menu_obj.addAction(help_action)
