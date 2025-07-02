@@ -1,7 +1,24 @@
 # Spectra
-*Smart Parts Evaluation & Counting Tool for Risk Assessment*
 
-A P&ID analysis application for detecting and categorizing objects using deep learning models with an intuitive GUI, built for frequency analysis in Quantitative Risk Assessments.
+<p align="center">
+   <i>
+      Smart Parts Evaluation &amp; Counting Tool for Risk Assessment
+   </i>
+</p>
+
+<p align="center">
+  <img src="spectra/analyser/assets/images/spectra_splash.png" alt="Spectra Logo" />
+</p>
+<p style="text-align:center;"></p>
+
+
+## Overview 
+
+A P&ID analysis application for detecting and categorizing objects using deep learning models via Roboflow API (local YOLO model support incoming).
+
+Built with PySide6 for an intuitive GUI, allowing easy editing and navigation of PDFs, automatic results calculation and robust import/export functionality. 
+
+Designed to automate the "Parts Count" for frequency analysis in Quantitative Risk Assessments: a tedious, time-consuming and laborous task.
 
 ## Features
 
@@ -11,7 +28,7 @@ A P&ID analysis application for detecting and categorizing objects using deep le
 - **Frequency Analysis**: Calculate object frequencies by hole size categories
 - **Export Results**: Export analysis results to CSV (more export options soon)
 
-## Getting Started
+## Install
 
 1. Install dependencies:
    ```bash
@@ -19,11 +36,19 @@ A P&ID analysis application for detecting and categorizing objects using deep le
    ```
 
 2. Set up Roboflow API key:
+
+   On Windows:
    ```bash
-   export ROBOFLOW_API_KEY="your_api_key_here"
+   set ROBOFLOW_API_KEY=your_api_key_here
    ```
 
-3. **Recommended:** Launch the app from the project root using the shortcut:
+   On Linux:
+   ```bash:
+   export ROBOFLOW_API_KEY=your_api_key_here
+   ```
+## Usage 
+
+1. Launch the app from the project root using the shortcut:
    ```bash
    python run_analyser.py
    ```
