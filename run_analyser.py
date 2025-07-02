@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Shortcut launcher for Spectra Analyser app.
+Shortcut launcher for Spectra.
 """
 import sys
 import subprocess

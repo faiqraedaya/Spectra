@@ -38,10 +38,13 @@ def add_section(self):
     self.sections_list.append(new_section)
     update_sections_table(self)
     update_section_filter_dropdown(self)
-    self.sections_table.selectRow(len(self.sections_list) - 1)
+    if self.sections_panel.sections_table:
+        self.sections_panel.sections_table.selectRow(len(self.sections_list) - 1)
 
 def delete_section(self):
-    selected = self.sections_table.currentRow()
+    if not self.sections_panel.sections_table:
+        return
+    selected = self.sections_panel.sections_table.currentRow()
     if selected < 0:
         return
     section = self.sections_list[selected]
@@ -54,20 +57,24 @@ def delete_section(self):
 
 def move_section_up(self):
     """Move the selected section up in the list"""
-    selected = self.sections_table.currentRow()
+    if not self.sections_panel.sections_table:
+        return
+    selected = self.sections_panel.sections_table.currentRow()
     if selected > 0:
         self.sections_list[selected-1], self.sections_list[selected] = self.sections_list[selected], self.sections_list[selected-1]
         update_sections_table(self)
-        self.sections_table.selectRow(selected-1)
+        self.sections_panel.sections_table.selectRow(selected-1)
         update_section_filter_dropdown(self)
 
 def move_section_down(self):
     """Move the selected section down in the list"""
-    selected = self.sections_table.currentRow()
+    if not self.sections_panel.sections_table:
+        return
+    selected = self.sections_panel.sections_table.currentRow()
     if 0 <= selected < len(self.sections_list)-1:
         self.sections_list[selected+1], self.sections_list[selected] = self.sections_list[selected], self.sections_list[selected+1]
         update_sections_table(self)
-        self.sections_table.selectRow(selected+1)
+        self.sections_panel.sections_table.selectRow(selected+1)
         update_section_filter_dropdown(self)
 
 def import_sections_csv(self):
@@ -109,23 +116,27 @@ def import_sections_csv(self):
             QMessageBox.warning(self, "Import Error", f"Failed to import CSV file: {str(e)}")
 
 def update_sections_table(self):
-    self.sections_table.blockSignals(True)
-    self.sections_table.setRowCount(len(self.sections_list))
+    if not self.sections_panel.sections_table:
+        return
+    self.sections_panel.sections_table.blockSignals(True)
+    self.sections_panel.sections_table.setRowCount(len(self.sections_list))
     for i, section in enumerate(self.sections_list):
         # Section name
         name_item = QTableWidgetItem(section.name)
         name_item.setFlags(name_item.flags() | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-        self.sections_table.setItem(i, 0, name_item)
+        self.sections_panel.sections_table.setItem(i, 0, name_item)
         
         # Line size
         mm_text = f"{section.line_size:.2f}" if section.line_size is not None else ""
         mm_item = QTableWidgetItem(mm_text)
         mm_item.setFlags(mm_item.flags() | Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-        self.sections_table.setItem(i, 1, mm_item)
-    self.sections_table.blockSignals(False)
+        self.sections_panel.sections_table.setItem(i, 1, mm_item)
+    self.sections_panel.sections_table.blockSignals(False)
 
 def handle_section_edit(self, item):
     """Handle editing of section table items"""
+    if not self.sections_panel.sections_table:
+        return
     row = item.row()
     col = item.column()
     text = item.text().strip()

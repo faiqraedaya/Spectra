@@ -1,6 +1,15 @@
-# Spectra Analyser
+# Spectra
+*Smart Parts Evaluation & Counting Tool for Risk Assessment
 
-A PDF analysis application for detecting and categorizing objects in technical drawings.
+A P&ID analysis application for detecting and categorizing objects using deep learning models with an intuitive GUI, built for frequency analysis in Quantitative Risk Assessments.
+
+## Features
+
+- **PDF Analysis**: Load and analyse PDF documents
+- **Object Detection & Addition**: Detect objects using Roboflow API or add manually
+- **Section Management**: Assign and organise objects by sections
+- **Frequency Analysis**: Calculate object frequencies by size categories
+- **Export Results**: Export analysis results to CSV
 
 ## Project Structure
 
@@ -30,13 +39,7 @@ spectra/analyser/
 └── run_analyser.py       # Shortcut launcher (recommended)
 ```
 
-## Key Features
 
-- **PDF Analysis**: Load and analyze PDF documents
-- **Object Detection**: Detect objects using Roboflow API
-- **Section Management**: Organize detections by sections
-- **Frequency Analysis**: Calculate object frequencies by size categories
-- **Export Results**: Export analysis results to CSV
 
 ## Getting Started
 

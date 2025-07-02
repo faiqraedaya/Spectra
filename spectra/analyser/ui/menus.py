@@ -57,10 +57,12 @@ class MenuManager:
         file_menu.addSeparator()
 
         open_pdf_action = QAction("Open PDF", self.main_window)
+        open_pdf_action.setShortcut("Ctrl+Shift+O")
         open_pdf_action.triggered.connect(self.main_window.open_pdf)
         file_menu.addAction(open_pdf_action)
 
         save_pdf_action = QAction("Save PDF", self.main_window)
+        save_pdf_action.setShortcut("Ctrl+Shift+S")
         save_pdf_action.triggered.connect(self.main_window.save_pdf)
         file_menu.addAction(save_pdf_action)
 
