@@ -1,3 +1,9 @@
+
+<p align="center">
+  <img src="spectra/analyser/assets/images/spectra_splash.png" alt="Spectra Logo" />
+</p>
+<p style="text-align:center;"></p>
+
 # Spectra
 
 <p align="center">
@@ -6,19 +12,13 @@
    </i>
 </p>
 
-<p align="center">
-  <img src="spectra/analyser/assets/images/spectra_splash.png" alt="Spectra Logo" />
-</p>
-<p style="text-align:center;"></p>
-
-
 ## Overview 
 
 A P&ID analysis application for detecting and categorizing objects using deep learning models via Roboflow API (local YOLO model support incoming).
 
-Built with PySide6 for an intuitive GUI, allowing easy editing and navigation of PDFs, automatic results calculation and robust import/export functionality. 
+Built with PySide6 for an intuitive GUI, allowing easy editing and navigation of PDFs, automatic or manual object additions, live results updates, and robust import/export functionality. 
 
-Designed to automate the "Parts Count" for frequency analysis in Quantitative Risk Assessments: a tedious, time-consuming and laborous task.
+Designed to automate the "Parts Count" methodology for frequency analysis in Quantitative Risk Assessments: a tedious, time-consuming and laborous task.
 
 ## Features
 
