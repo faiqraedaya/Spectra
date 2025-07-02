@@ -1,5 +1,5 @@
 # Spectra
-*Smart Parts Evaluation & Counting Tool for Risk Assessment
+*Smart Parts Evaluation & Counting Tool for Risk Assessment*
 
 A P&ID analysis application for detecting and categorizing objects using deep learning models with an intuitive GUI, built for frequency analysis in Quantitative Risk Assessments.
 
