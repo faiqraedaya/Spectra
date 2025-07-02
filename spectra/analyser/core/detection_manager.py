@@ -1,12 +1,12 @@
 import copy
 from typing import List, Optional
+
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenu, QMessageBox
-from detection.types import Detection
-from detection.categories_map import get_all_frequency_categories, get_category
-from sections.sections import Section, update_sections_table
+from PySide6.QtWidgets import QMenu
 
+from detection.types import Detection
+from sections.sections import Section, update_sections_table
 
 class DetectionManager:
     """Manages detection operations and state"""

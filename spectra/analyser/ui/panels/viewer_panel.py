@@ -1,8 +1,14 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QGroupBox, QVBoxLayout, QHBoxLayout, QScrollArea, 
-    QPushButton, QLabel, QLineEdit
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
 )
+
 from ui.pdf_viewer import PDFViewer
 
 

@@ -1,6 +1,6 @@
 from typing import Optional
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
+    QDialog, QVBoxLayout, QLabel, QComboBox, 
     QLineEdit, QDialogButtonBox, QMessageBox
 )
 from detection.categories_map import get_all_frequency_categories

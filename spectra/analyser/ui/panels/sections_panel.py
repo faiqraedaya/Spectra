@@ -1,11 +1,20 @@
 from PySide6.QtWidgets import (
-    QGroupBox, QVBoxLayout, QHBoxLayout, QTableWidget, 
-    QPushButton, QAbstractItemView
+    QAbstractItemView,
+    QGroupBox,
+    QHBoxLayout,
+    QPushButton,
+    QTableWidget,
+    QVBoxLayout,
 )
+
 from sections.sections import (
-    add_section, delete_section, handle_section_edit,
-    move_section_up, move_section_down, import_sections_csv,
-    update_sections_table
+    add_section,
+    delete_section,
+    handle_section_edit,
+    import_sections_csv,
+    move_section_down,
+    move_section_up,
+    update_sections_table,
 )
 
 

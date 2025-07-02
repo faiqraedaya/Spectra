@@ -1,10 +1,11 @@
 import sys
 
-from PySide6.QtWidgets import QApplication, QSplashScreen
 from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QApplication, QSplashScreen
+
+from config.settings import SPLASH_SCREEN_PATH
 
 from .main_window import Spectra
-from config.settings import SPLASH_SCREEN_PATH
 
 def main():
     app = QApplication(sys.argv)

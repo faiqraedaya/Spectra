@@ -1,6 +1,5 @@
-from PySide6.QtWidgets import QMenu, QInputDialog, QMessageBox
 from PySide6.QtGui import QAction
-
+from PySide6.QtWidgets import QMenu
 
 class MenuManager:
     """Manages all menu creation and actions for the main window"""

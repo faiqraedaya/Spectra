@@ -1,7 +1,14 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
-    QComboBox, QLabel, QProgressBar, QTableWidgetItem
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
+
 from detection.categories_map import get_all_frequency_categories
 
 

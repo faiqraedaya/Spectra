@@ -1,37 +1,34 @@
+import csv
 import os
 import re
-import csv
 from typing import List
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QSplitter, QTabWidget
-)
+from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget, QVBoxLayout, QWidget
+
 from config.settings import (
     APP_TITLE,
-    DEFAULT_WINDOW_WIDTH,
-    DEFAULT_WINDOW_HEIGHT,
-    DEFAULT_WINDOW_X,
-    DEFAULT_WINDOW_Y,
     DEFAULT_CONFIDENCE,
     DEFAULT_OVERLAP,
+    DEFAULT_WINDOW_HEIGHT,
+    DEFAULT_WINDOW_WIDTH,
+    DEFAULT_WINDOW_X,
+    DEFAULT_WINDOW_Y,
     FREQUENCY_CSV_PATH,
+    MAIN_SPLITTER_SIZES,
     ROBOFLOW_API_KEY_ENV,
-    MAIN_SPLITTER_SIZES
 )
+from core.analysis_manager import AnalysisManager
+from core.detection_manager import DetectionManager
+from core.project_manager import ProjectManager
 from detection.types import Detection
 from sections.sections import Section
-from utils.frequency import FrequencyTable
-
-# Import modular components
 from ui.menus import MenuManager
-from ui.panels.viewer_panel import ViewerPanel
-from ui.panels.sections_panel import SectionsPanel
 from ui.panels.objects_panel import ObjectsPanel
 from ui.panels.results_panel import ResultsPanel
-from core.project_manager import ProjectManager
-from core.detection_manager import DetectionManager
-from core.analysis_manager import AnalysisManager
+from ui.panels.sections_panel import SectionsPanel
+from ui.panels.viewer_panel import ViewerPanel
+from utils.frequency import FrequencyTable
 
 class Spectra(QMainWindow):
     """Modular main application window using separated components"""

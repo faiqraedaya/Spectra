@@ -8,10 +8,41 @@ A P&ID analysis application for detecting and categorizing objects using deep le
 - **PDF Analysis**: Load and analyse PDF documents
 - **Object Detection & Addition**: Detect objects using Roboflow API or add manually
 - **Section Management**: Assign and organise objects by sections
-- **Frequency Analysis**: Calculate object frequencies by size categories
-- **Export Results**: Export analysis results to CSV
+- **Frequency Analysis**: Calculate object frequencies by hole size categories
+- **Export Results**: Export analysis results to CSV (more export options soon)
+
+## Getting Started
+
+1. Install dependencies:
+   ```bash
+   pip install PySide6 roboflow pillow pymupdf
+   ```
+
+2. Set up Roboflow API key:
+   ```bash
+   export ROBOFLOW_API_KEY="your_api_key_here"
+   ```
+
+3. **Recommended:** Launch the app from the project root using the shortcut:
+   ```bash
+   python run_analyser.py
+   ```
+   This ensures all imports work correctly.
+
+   Or, to run directly as a module:
+   ```bash
+   python -m spectra.analyser.main
+   ```
 
 ## Project Structure
+
+The codebase is organized into logical modules:
+- **Core**: Main application logic and window management
+- **UI**: All user interface components
+- **Detection**: Object detection and categorization
+- **Sections**: Section management and filtering
+- **Utils**: Helper functions and calculations
+- **Config**: Centralized configuration management 
 
 ```
 spectra/analyser/
@@ -39,45 +70,6 @@ spectra/analyser/
 └── run_analyser.py       # Shortcut launcher (recommended)
 ```
 
+## License
 
-
-## Getting Started
-
-1. Install dependencies:
-   ```bash
-   pip install PySide6 ultralytics
-   ```
-
-2. Set up Roboflow API key:
-   ```bash
-   export ROBOFLOW_API_KEY="your_api_key_here"
-   ```
-
-3. **Recommended:** Launch the app from the project root using the shortcut:
-   ```bash
-   python run_analyser.py
-   ```
-   This ensures all imports work correctly.
-
-   Or, to run directly as a module:
-   ```bash
-   python -m spectra.analyser.main
-   ```
-
-## Configuration
-
-Application settings are centralized in `config/settings.py`:
-- Window dimensions and positioning
-- Default detection parameters
-- File paths for assets
-- Table configurations
-
-## Development
-
-The codebase is organized into logical modules:
-- **Core**: Main application logic and window management
-- **UI**: All user interface components
-- **Detection**: Object detection and categorization
-- **Sections**: Section management and filtering
-- **Utils**: Helper functions and calculations
-- **Config**: Centralized configuration management 
+This project is provided under the MIT License.

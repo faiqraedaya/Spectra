@@ -1,7 +1,9 @@
 from typing import List
-from PySide6.QtWidgets import QMessageBox, QInputDialog
-from detection.roboflow import RoboflowAnalysisThread
+
+from PySide6.QtWidgets import QInputDialog, QMessageBox
+
 from detection.categories_map import get_category
+from detection.roboflow import RoboflowAnalysisThread
 
 
 class AnalysisManager:

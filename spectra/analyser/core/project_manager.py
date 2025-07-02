@@ -1,7 +1,7 @@
 import json
-import os
-from typing import List
+
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+
 from detection.types import Detection
 from sections.sections import Section
 

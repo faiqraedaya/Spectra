@@ -1,7 +1,14 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
-    QComboBox, QLabel, QPushButton, QTableWidgetItem
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
+
 from utils.frequency import calculate_section_frequencies
 
 
