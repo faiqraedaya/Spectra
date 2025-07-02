@@ -28,14 +28,27 @@ Designed to automate the "Parts Count" for frequency analysis in Quantitative Ri
 - **Frequency Analysis**: Calculate object frequencies by hole size categories
 - **Export Results**: Export analysis results to CSV (more export options soon)
 
+## Requirements 
+- Python 3.7+
+- PySide6
+- Roboflow
+- Pillow
+- PyMuPDF
+
 ## Install
 
-1. Install dependencies:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/faiqraedaya/Spectra
+   cd "Spectra"
+   ```
+
+2. Install dependencies:
    ```bash
    pip install PySide6 roboflow pillow pymupdf
    ```
 
-2. Set up Roboflow API key:
+3. Set up Roboflow API key:
 
    On Windows:
    ```bash
