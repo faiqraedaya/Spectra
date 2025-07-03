@@ -2,11 +2,11 @@ import copy
 from typing import List, Optional
 
 from PySide6.QtCore import QPoint
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import QMenu
 
 from detection.types import Detection
-from sections.sections import Section, update_sections_table
+from sections.sections import Section, update_sections_table, polyline_intersects_bbox, assign_objects_to_sections, point_in_polygon, get_section_for_bbox
 
 class DetectionManager:
     """Manages detection operations and state"""
@@ -64,6 +64,10 @@ class DetectionManager:
                 new_det.page_num = self.main_window.pdf_viewer.current_page + 1
                 
             self.main_window.detections.append(new_det)
+            # Assign section by polyline if possible
+            self._assign_detection_to_section(new_det)
+            # Robust: reassign all objects after any change
+            assign_objects_to_sections(self.main_window)
             self.main_window.update_objects_table()
             self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
             
@@ -98,39 +102,41 @@ class DetectionManager:
                 # Handle new section creation
                 self._handle_new_section(detection.section, detection.line_size)
                 
+                from sections.sections import assign_objects_to_sections
+                assign_objects_to_sections(self.main_window)
                 self.main_window.update_objects_table()
                 self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
                 self.main_window.update_results_table()
 
     def add_manual_detection(self, bbox):
-        """Add a manually drawn detection"""
         from ui.dialogs.detection_dialog import DetectionDialog
-        
-        dialog = DetectionDialog(self.main_window, None)
+        from sections.sections import get_section_for_bbox, assign_objects_to_sections
+        # Detect section for this bbox using robust logic
+        prefill_section = get_section_for_bbox(bbox, self.main_window.sections_list)
+        prefill_line_size = None
+        if prefill_section != "Unassigned":
+            section = next((s for s in self.main_window.sections_list if s.name == prefill_section), None)
+            if section:
+                prefill_line_size = section.line_size
+        dialog = DetectionDialog(self.main_window, None, prefill_section=prefill_section, prefill_line_size=prefill_line_size)
         if dialog.exec():
             class_name = dialog.get_class_name()
-            section_name = dialog.get_section_name()
             line_size_value = dialog.get_line_size()
             count_value = dialog.get_count()
-            
-            # Handle new section creation
-            self._handle_new_section(section_name, line_size_value)
-            
-            # Create new detection
             new_detection = Detection(
                 name=class_name,
-                confidence=1.0,  # Default for manual detections
+                confidence=1.0,
                 bbox=bbox,
                 page_num=self.main_window.pdf_viewer.current_page + 1,
-                section=section_name,
+                section="Unassigned",
                 source="manual",
                 line_size=line_size_value,
                 count=count_value,
             )
-            
             self.main_window.undo_stack.append(self.main_window.detections.copy())
             self.main_window.redo_stack.clear()
             self.main_window.detections.append(new_detection)
+            assign_objects_to_sections(self.main_window)
             self.main_window.update_objects_table()
             self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
             self.main_window.update_results_table()
@@ -155,6 +161,16 @@ class DetectionManager:
                 section.line_size = line_size
                 update_sections_table(self.main_window)
 
+    def _assign_detection_to_section(self, detection):
+        """Assign a detection to the first section whose polyline it touches. Returns True if assigned."""
+        from sections.sections import polyline_intersects_bbox
+        for section in self.main_window.sections_list:
+            if polyline_intersects_bbox(section.points, detection.bbox):
+                detection.section = section.name
+                return True
+        detection.section = "Unassigned"
+        return False
+
     def undo(self):
         """Undo the last annotation change"""
         if not self.main_window.undo_stack:
@@ -177,36 +193,34 @@ class DetectionManager:
         """Handle bounding box changes from drag/resize"""
         if 0 <= idx < len(self.main_window.detections):
             self.main_window.detections[idx].bbox = bbox
+        from sections.sections import assign_objects_to_sections
+        assign_objects_to_sections(self.main_window)
         self.main_window.update_objects_table()
 
-    def on_bbox_right_clicked(self, bbox_index: int):
+    def on_bbox_right_clicked(self, bbox_index: int, global_pos=None):
         """Handle right-click on bounding box"""
         menu = QMenu(self.main_window)
-        
         cut_action = QAction("Cut", self.main_window)
         copy_action = QAction("Copy", self.main_window)
         paste_action = QAction("Paste", self.main_window)
         edit_action = QAction("Edit Object", self.main_window)
         delete_action = QAction("Delete Object", self.main_window)
-        
         menu.addAction(cut_action)
         menu.addAction(copy_action)
         menu.addAction(paste_action)
         menu.addSeparator()
         menu.addAction(edit_action)
         menu.addAction(delete_action)
-        
-        # Enable/disable paste
         paste_action.setEnabled(self.clipboard_detection is not None)
-        
-        # Connect actions
         cut_action.triggered.connect(lambda: self.cut_detection(bbox_index))
         copy_action.triggered.connect(lambda: self.copy_detection(bbox_index))
         paste_action.triggered.connect(lambda: self.paste_detection(bbox_index))
         edit_action.triggered.connect(lambda: self.edit_detection(bbox_index))
         delete_action.triggered.connect(lambda: self.delete_detection(bbox_index))
-        
-        menu.exec(self.main_window.cursor().pos())
+        if global_pos is not None:
+            menu.exec(global_pos)
+        else:
+            menu.exec(QCursor.pos())
 
     def on_background_right_clicked(self, pos: QPoint):
         """Handle right-click on background"""

@@ -10,11 +10,13 @@ from detection.types import Detection
 class DetectionDialog(QDialog):
     """Dialog for editing or creating detections"""
     
-    def __init__(self, main_window, detection: Optional[Detection] = None):
+    def __init__(self, main_window, detection: Optional[Detection] = None, prefill_section: Optional[str] = None, prefill_line_size: Optional[float] = None):
         super().__init__(main_window)
         self.main_window = main_window
         self.detection = detection
         self.is_edit_mode = detection is not None
+        self.prefill_section = prefill_section
+        self.prefill_line_size = prefill_line_size
         
         self.class_combo = None
         self.section_combo = None
@@ -56,7 +58,7 @@ class DetectionDialog(QDialog):
         layout.addWidget(self.line_size_edit)
         
         # Count input
-        count_label = QLabel("Count (number of objects in box):")
+        count_label = QLabel("Count:")
         layout.addWidget(count_label)
         self.count_edit = QLineEdit()
         self.count_edit.setText("1")
@@ -94,9 +96,15 @@ class DetectionDialog(QDialog):
             if self.class_combo:
                 self.class_combo.setCurrentText("")
             if self.section_combo:
-                self.section_combo.setCurrentText("Unassigned")
+                if self.prefill_section:
+                    self.section_combo.setCurrentText(self.prefill_section)
+                else:
+                    self.section_combo.setCurrentText("Unassigned")
             if self.line_size_edit:
-                self.line_size_edit.setText("")
+                if self.prefill_line_size is not None:
+                    self.line_size_edit.setText(str(self.prefill_line_size))
+                else:
+                    self.line_size_edit.setText("")
             if self.count_edit:
                 self.count_edit.setText("1")
             

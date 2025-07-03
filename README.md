@@ -1,4 +1,3 @@
-
 <p align="center">
   <img src="spectra/analyser/assets/images/spectra_splash.png" alt="Spectra Logo" />
 </p>
@@ -16,7 +15,7 @@
 
 A P&ID analysis application for detecting and categorizing objects using deep learning models via Roboflow API (local YOLO model support incoming).
 
-Built with PySide6 for an intuitive GUI, allowing easy editing and navigation of PDFs, automatic or manual object additions, live results updates, and robust import/export functionality. 
+Built with PySide6 for an intuitive GUI, allowing easy editing and navigation of PDFs, automatic or manual object additions, live results updates, and robust import/export functionality.
 
 Designed to automate the "Parts Count" methodology for frequency analysis in Quantitative Risk Assessments: a tedious, time-consuming and laborous task.
 
@@ -25,6 +24,7 @@ Designed to automate the "Parts Count" methodology for frequency analysis in Qua
 - **PDF Analysis**: Load and analyse PDF documents
 - **Object Detection & Addition**: Detect objects using Roboflow API or add manually
 - **Section Management**: Assign and organise objects by sections
+- **Section Drawing**: Draw sections directly on PDF as polylines with interactive tools
 - **Frequency Analysis**: Calculate object frequencies by hole size categories
 - **Export Results**: Export analysis results to CSV (more export options soon)
 
@@ -63,7 +63,7 @@ Designed to automate the "Parts Count" methodology for frequency analysis in Qua
 
 1. Launch the app from the project root using the shortcut:
    ```bash
-   python run_analyser.py
+   python run_spectra.py
    ```
    This ensures all imports work correctly.
 

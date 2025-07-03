@@ -6,8 +6,8 @@ from pathlib import Path
 
 # Application metadata
 APP_NAME = "Spectra"
-APP_VERSION = "1.0.0"
-APP_TITLE = f"{APP_NAME} V{APP_VERSION}"
+APP_VERSION = "1.1.0"
+APP_TITLE = f"{APP_NAME} {APP_VERSION}"
 
 # Window settings
 DEFAULT_WINDOW_WIDTH = 1600
@@ -25,6 +25,7 @@ IMAGES_DIR = ASSETS_DIR / "images"
 DATA_DIR = ASSETS_DIR / "data"
 
 SPLASH_SCREEN_PATH = IMAGES_DIR / "spectra_splash.png"
+ICON_PATH = IMAGES_DIR / "spectra_icon"
 FREQUENCY_CSV_PATH = DATA_DIR / "frequency.csv"
 
 # Environment variables

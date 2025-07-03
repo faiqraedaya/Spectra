@@ -5,11 +5,10 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 from sections.sections import (
-    add_section,
-    delete_section,
     handle_section_edit,
     import_sections_csv,
     move_section_down,
@@ -27,15 +26,15 @@ class SectionsPanel:
         
     def create_panel(self):
         """Create the sections panel with table and controls"""
-        sections_panel = QGroupBox("Sections")
+        sections_panel = QWidget()
         sections_layout = QVBoxLayout()
         sections_panel.setLayout(sections_layout)
 
         # Create sections table
         self.sections_table = QTableWidget()
-        self.sections_table.setColumnCount(2)
+        self.sections_table.setColumnCount(3)
         self.sections_table.setHorizontalHeaderLabels(
-            ["Section Name", "Line Size [mm]"]
+            ["Section Name", "Line Size [mm]", "Color"]
         )
         self.sections_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.sections_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -59,16 +58,6 @@ class SectionsPanel:
 
         sections_layout.addWidget(self.sections_table, 1)
 
-        # Buttons to add/delete sections
-        button_layout = QHBoxLayout()
-        add_button = QPushButton("Add")
-        add_button.clicked.connect(lambda: add_section(self.main_window))
-        button_layout.addWidget(add_button)
-        delete_button = QPushButton("Delete")
-        delete_button.clicked.connect(lambda: delete_section(self.main_window))
-        button_layout.addWidget(delete_button)
-        sections_layout.addLayout(button_layout)
-
         # Buttons to move sections up/down
         move_layout = QHBoxLayout()
         up_button = QPushButton("Move Up")
@@ -83,7 +72,7 @@ class SectionsPanel:
         import_button = QPushButton("Import CSV")
         import_button.clicked.connect(lambda: import_sections_csv(self.main_window))
         sections_layout.addWidget(import_button)
-
+        
         sections_layout.addStretch()
 
         # Initial update

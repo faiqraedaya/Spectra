@@ -35,7 +35,7 @@ class ProjectManager:
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
-                return
+                return None
 
         # Reset everything
         self.main_window.current_pdf_path = None
@@ -58,6 +58,8 @@ class ProjectManager:
         self.main_window.pdf_viewer.original_pixmap = None
         self.main_window.pdf_viewer.scaled_pixmap = None
         self.main_window.pdf_viewer.detections = []
+        self.main_window.pdf_viewer.set_sections([])
+        return None  # No file path for new project
 
     def open_project(self):
         """Open a project file"""
@@ -68,14 +70,13 @@ class ProjectManager:
             "Spectra Project Files (*.spectra.json);;JSON Files (*.json)",
         )
         if not file_path:
-            return
+            return None
             
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 
             # Clear current state
-            self.main_window.current_pdf_path = data.get("current_pdf_path", None)
             self.main_window.sections_list = [
                 Section.from_dict(s) for s in data.get("sections", [])
             ]
@@ -91,21 +92,21 @@ class ProjectManager:
             self.main_window.update_section_filter_dropdown()
             self.main_window.update_objects_table()
             
-            if self.main_window.current_pdf_path:
-                self.main_window.pdf_viewer.load_pdf(self.main_window.current_pdf_path)
-                self.main_window.update_navigation_controls()
-            else:
-                self.main_window.pdf_viewer.cleanup()
-                self.main_window.pdf_viewer.setText("No PDF loaded")
-                
+            # Do not auto-load PDF, just update viewer state
+            self.main_window.pdf_viewer.cleanup()
+            self.main_window.pdf_viewer.setText("No PDF loaded")
+            
             self.main_window.pdf_viewer.set_detections(self.main_window.detections)
+            self.main_window.pdf_viewer.set_sections(self.main_window.sections_list)
             QMessageBox.information(
                 self.main_window, "Open Project", "Project loaded successfully."
             )
+            return file_path
         except Exception as e:
             QMessageBox.critical(
                 self.main_window, "Open Error", f"Failed to open project: {str(e)}"
             )
+            return None
 
     def save_project(self):
         """Save the current project"""
@@ -116,10 +117,9 @@ class ProjectManager:
             "Spectra Project Files (*.spectra.json);;JSON Files (*.json)",
         )
         if not file_path:
-            return
+            return None
             
         data = {
-            "current_pdf_path": self.main_window.current_pdf_path,
             "sections": [section.to_dict() for section in self.main_window.sections_list],
             "detections": [detection.to_dict() for detection in self.main_window.detections],
             "confidence": self.main_window.confidence,
@@ -131,10 +131,12 @@ class ProjectManager:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
             QMessageBox.information(self.main_window, "Save Project", "Project saved successfully.")
+            return file_path
         except Exception as e:
             QMessageBox.critical(
                 self.main_window, "Save Error", f"Failed to save project: {str(e)}"
             )
+            return None
 
     def open_pdf(self):
         """Open a PDF"""

@@ -22,6 +22,14 @@ class MenuManager:
         edit_menu: QMenu = menu_bar.addMenu("Edit")
         self._create_edit_menu(edit_menu)
 
+        # Objects menu
+        objects_menu: QMenu = menu_bar.addMenu("Objects")
+        self._create_objects_menu(objects_menu)
+
+        # Sections menu
+        sections_menu: QMenu = menu_bar.addMenu("Sections")
+        self._create_sections_menu(sections_menu)
+
         # Analysis menu
         analysis_menu: QMenu = menu_bar.addMenu("Analysis")
         self._create_analysis_menu(analysis_menu)
@@ -96,10 +104,19 @@ class MenuManager:
 
         edit_menu.addSeparator()
 
-        add_object_action = QAction("Add Object", self.main_window)
+    def _create_sections_menu(self, sections_menu):
+        """Create Sections menu items"""
+        draw_section_action = QAction("Enter Draw Section Mode", self.main_window)
+        draw_section_action.setShortcut("Ctrl+Shift+Space")
+        draw_section_action.triggered.connect(self.main_window.enter_add_section_mode)
+        sections_menu.addAction(draw_section_action)
+
+    def _create_objects_menu(self, objects_menu):
+        """Create Objects menu items"""
+        add_object_action = QAction("Enter Add Object Mode", self.main_window)
         add_object_action.setShortcut("Ctrl+Space")
         add_object_action.triggered.connect(self.main_window.enter_add_object_mode)
-        edit_menu.addAction(add_object_action)
+        objects_menu.addAction(add_object_action)
 
     def _create_analysis_menu(self, analysis_menu):
         """Create Analysis menu items"""

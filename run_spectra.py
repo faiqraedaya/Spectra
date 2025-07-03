@@ -7,4 +7,4 @@ import subprocess
 
 if __name__ == "__main__":
     # Launch the analyser app as a module
-    subprocess.run([sys.executable, '-m', 'spectra.analyser.main']) 
+    subprocess.run([sys.executable, '-m', 'spectra.analyser.main'])

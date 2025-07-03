@@ -32,7 +32,7 @@ class ViewerPanel:
         
     def create_panel(self):
         """Create the viewer panel with PDF viewer and navigation controls"""
-        viewer_panel = QWidget() #QGroupBox("Viewer")
+        viewer_panel = QWidget()
         viewer_layout = QVBoxLayout()
         viewer_panel.setLayout(viewer_layout)
 
