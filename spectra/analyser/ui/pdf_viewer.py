@@ -2,11 +2,12 @@ import io
 import os
 import shutil
 import tempfile
+import time
 from typing import List, Tuple, Optional, cast
 
 from PIL import Image
 from PySide6.QtCore import QRect, Qt, Signal, QPoint
-from PySide6.QtGui import QFont, QMouseEvent, QPainter, QPen, QPixmap, QBrush
+from PySide6.QtGui import QFont, QMouseEvent, QPainter, QPen, QPixmap, QBrush, QPolygon
 from PySide6.QtWidgets import QLabel, QMessageBox
 import fitz
 
@@ -19,6 +20,8 @@ class PDFViewer(QLabel):
     bbox_changed = Signal(int, tuple)  # index, new bbox
     background_right_clicked = Signal(QPoint)  # position of right click on background
     bbox_edit_finished = Signal(int)  # index of detection finished editing
+    section_drawn = Signal(list)  # list of (x, y) points for new section
+    section_right_clicked = Signal(int, object)  # index of section, global position
 
     def __init__(self):
         super().__init__()
@@ -56,6 +59,12 @@ class PDFViewer(QLabel):
         self.drawing_box = False
         self.box_start = None
         self.box_end = None
+
+        # Section drawing mode
+        self.add_section_mode = False
+        self.drawing_section = False
+        self.section_points = []  # List of (x, y) points for current section being drawn
+        self.sections = []  # List of Section objects to display
 
         # Drag/resize bbox
         self.selected_bbox_index = None
@@ -244,6 +253,53 @@ class PDFViewer(QLabel):
                 self.pan_start_pos = event.pos()
             self.update()
             return
+        
+        if self.add_section_mode:
+            if event.button() == Qt.MouseButton.LeftButton:
+                # Convert widget coordinates to image coordinates
+                img_x, img_y = self.widget_to_image_coords(event.pos().x(), event.pos().y())
+                
+                # Check for double-click to finish section
+                if hasattr(self, '_last_click_time') and hasattr(self, '_last_click_pos'):
+                    current_time = time.time()
+                    if (current_time - self._last_click_time < 0.3 and 
+                        abs(event.pos().x() - self._last_click_pos.x()) < 5 and 
+                        abs(event.pos().y() - self._last_click_pos.y()) < 5):
+                        # Double-click detected - finish section
+                        if len(self.section_points) >= 2:
+                            self.section_drawn.emit(self.section_points.copy())
+                            self.section_points = []
+                            self.drawing_section = False
+                        self.update()
+                        return
+                
+                # Single click - add point
+                self.section_points.append((img_x, img_y))
+                self.drawing_section = True
+                
+                # Store click info for double-click detection
+                self._last_click_time = time.time()
+                self._last_click_pos = event.pos()
+                
+                self.update()
+            elif event.button() == Qt.MouseButton.RightButton:
+                if not self.section_points:
+                    # Exit draw mode if not currently drawing
+                    self.set_add_section_mode(False)
+                    main_window = self.get_main_window()
+                    if main_window is not None:
+                        main_window.exit_add_section_mode()
+                    return
+                # Remove last point
+                if self.section_points:
+                    self.section_points.pop()
+                    if not self.section_points:
+                        self.drawing_section = False
+                self.update()
+            elif event.button() == Qt.MouseButton.MiddleButton:
+                self.is_panning = True
+                self.pan_start_pos = event.pos()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             # Check if clicking on a handle or bbox
             idx = self.get_bbox_at_pos(event.pos())
@@ -274,12 +330,21 @@ class PDFViewer(QLabel):
                 self.selected_bbox_index = None  # Deselect if clicking empty space
             self.update()
         elif event.button() == Qt.MouseButton.RightButton:
-            idx = self.get_bbox_at_pos(event.pos())
-            if idx is not None:
-                self.bbox_right_clicked.emit(idx)
+            # Check for section first, then bbox
+            section_idx = self.get_section_at_pos(event.pos())
+            if section_idx is not None:
+                self.section_right_clicked.emit(section_idx, event.globalPos())
             else:
-                if hasattr(self, 'background_right_clicked'):
-                    self.background_right_clicked.emit(event.pos())
+                idx = self.get_bbox_at_pos(event.pos())
+                if idx is not None:
+                    main_window = self.get_main_window()
+                    if main_window is not None and hasattr(main_window, 'on_bbox_right_clicked'):
+                        main_window.on_bbox_right_clicked(idx, event.globalPos())
+                    else:
+                        self.bbox_right_clicked.emit(idx)
+                else:
+                    if hasattr(self, 'background_right_clicked'):
+                        self.background_right_clicked.emit(event.pos())
             self.update()
         elif event.button() == Qt.MouseButton.MiddleButton:
             self.is_panning = True
@@ -301,6 +366,21 @@ class PDFViewer(QLabel):
                 self.update()
                 return
             return  # Always use plus cursor in add object mode, skip other cursor logic
+        
+        if self.add_section_mode:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            if self.is_panning and self.pan_start_pos is not None:
+                delta = event.pos() - self.pan_start_pos
+                self.image_offset[0] += delta.x()
+                self.image_offset[1] += delta.y()
+                self.pan_start_pos = event.pos()
+                self.update_display()
+                return
+            # Update the preview line for section drawing
+            if self.drawing_section and self.section_points:
+                self.update()
+                return
+            return  # Always use plus cursor in add section mode, skip other cursor logic
         if self.resizing and self.selected_bbox_index is not None and self.resize_start_bbox is not None and self.resize_start_pos is not None:
             # Resize bbox
             idx = self.selected_bbox_index
@@ -529,12 +609,72 @@ class PDFViewer(QLabel):
             self.box_end = None
         self.update()
 
+    def set_add_section_mode(self, enabled: bool):
+        """Enable/disable section drawing mode"""
+        self.add_section_mode = enabled
+        if enabled:
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.section_points = []
+            self.drawing_section = False
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.section_points = []
+            self.drawing_section = False
+        self.update()
+
+    def set_sections(self, sections):
+        """Set the sections to display"""
+        self.sections = sections
+        self.update()
+
+    def get_section_at_pos(self, pos: QPoint) -> Optional[int]:
+        """Get section index at given position, or None if not found"""
+        if not self.sections:
+            return None
+        
+        # Convert widget coordinates to image coordinates
+        img_x, img_y = self.widget_to_image_coords(pos.x(), pos.y())
+        
+        for i, section in enumerate(self.sections):
+            if not section.points or len(section.points) < 2:
+                continue
+            
+            # Simple point-in-polygon test using ray casting
+            if self._point_in_polygon(img_x, img_y, section.points):
+                return i
+        
+        return None
+
+    def _point_in_polygon(self, x: float, y: float, points: List[Tuple[float, float]]) -> bool:
+        """Ray casting algorithm to test if point is inside polygon"""
+        if len(points) < 3:
+            return False
+        
+        inside = False
+        j = len(points) - 1
+        
+        for i in range(len(points)):
+            xi, yi = points[i]
+            xj, yj = points[j]
+            
+            if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
+                inside = not inside
+            j = i
+        
+        return inside
+
     def keyPressEvent(self, event):
         if self.add_object_mode and event.key() == Qt.Key.Key_Escape:
             self.set_add_object_mode(False)
             main_window = self.get_main_window()
             if main_window is not None:
                 main_window.exit_add_object_mode()
+        elif self.add_section_mode and event.key() == Qt.Key.Key_Escape:
+            self.set_add_section_mode(False)
+            main_window = self.get_main_window()
+            if main_window is not None:
+                main_window.exit_add_section_mode()
+            return  # Prevent further event handling
         super().keyPressEvent(event)
 
     def widget_to_image_coords(self, x, y):
@@ -549,20 +689,94 @@ class PDFViewer(QLabel):
 
     def paintEvent(self, event):
         super().paintEvent(event)
+        painter = QPainter(self)
+        
+        # Draw sections
+        if self.sections:
+            self._draw_sections(painter)
+        
         # Draw preview box overlay if in add object mode and drawing
         if self.add_object_mode and self.drawing_box and self.box_start is not None and self.box_end is not None and hasattr(self.box_start, 'isNull') and hasattr(self.box_end, 'isNull') and not self.box_start.isNull() and not self.box_end.isNull():
             # Calculate pixmap offset
             if self.scaled_pixmap:
-                x = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-                y = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
-                painter = QPainter(self)
                 offset_start = self.box_start
                 offset_end = self.box_end
                 preview_rect = QRect(offset_start, offset_end)
                 painter.setPen(QPen(Qt.GlobalColor.blue, 2, Qt.PenStyle.DashLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(preview_rect)
-                painter.end()
+        
+        # Draw section preview if in add section mode
+        if self.add_section_mode and self.drawing_section and self.section_points:
+            self._draw_section_preview(painter)
+        
+        painter.end()
+
+    def _draw_sections(self, painter: QPainter):
+        """Draw all sections on the viewer"""
+        if not self.sections or not self.scaled_pixmap:
+            return
+        for section in self.sections:
+            if not section.points or len(section.points) < 2:
+                continue
+            widget_points = []
+            for img_x, img_y in section.points:
+                widget_x = img_x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
+                widget_y = img_y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
+                widget_points.append(QPoint(int(widget_x), int(widget_y)))
+            if len(widget_points) < 2:
+                continue
+            pen_width = max(3, int(4 * self.zoom_factor))
+            if section.color:
+                painter.setPen(QPen(section.color, pen_width, Qt.PenStyle.SolidLine))
+            else:
+                painter.setPen(QPen(Qt.GlobalColor.blue, pen_width, Qt.PenStyle.SolidLine))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPolyline(QPolygon(widget_points))
+            # Draw section name label at the first point with border and background
+            label_point = widget_points[0]
+            label_font = QFont("Arial", max(14, int(16 * self.zoom_factor)), QFont.Weight.Bold)
+            painter.setFont(label_font)
+            label_text = section.name
+            metrics = painter.fontMetrics()
+            text_width = metrics.horizontalAdvance(label_text)
+            text_height = metrics.height()
+            padding = 8
+            rect_x = label_point.x() + 6
+            rect_y = label_point.y() - text_height - 6
+            rect_w = text_width + 2 * padding
+            rect_h = text_height + 2 * padding // 2
+            # Draw background
+            painter.setBrush(QBrush(Qt.GlobalColor.white))
+            painter.setPen(QPen(section.color if section.color else Qt.GlobalColor.blue, 3))
+            painter.drawRect(rect_x, rect_y, rect_w, rect_h)
+            # Draw text
+            painter.setPen(QPen(Qt.GlobalColor.black, 1))
+            painter.drawText(rect_x + padding, rect_y + text_height + padding // 4 - 2, label_text)
+
+    def _draw_section_preview(self, painter: QPainter):
+        """Draw preview of section being drawn"""
+        if not self.section_points or len(self.section_points) < 1:
+            return
+        
+        # Convert image coordinates to widget coordinates
+        widget_points = []
+        for img_x, img_y in self.section_points:
+            widget_x = img_x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
+            widget_y = img_y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
+            widget_points.append(QPoint(int(widget_x), int(widget_y)))
+        
+        # Draw lines between points
+        painter.setPen(QPen(Qt.GlobalColor.green, max(2, int(3 * self.zoom_factor)), Qt.PenStyle.SolidLine))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        
+        for i in range(len(widget_points) - 1):
+            painter.drawLine(widget_points[i], widget_points[i + 1])
+        
+        # Draw points
+        painter.setBrush(QBrush(Qt.GlobalColor.green))
+        for point in widget_points:
+            painter.drawEllipse(point, 4, 4)
 
     def get_main_window(self):
         # Helper to find the main window for exit_add_object_mode

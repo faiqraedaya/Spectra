@@ -4,7 +4,7 @@ import re
 from typing import List
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget, QVBoxLayout, QWidget, QLabel
 
 from config.settings import (
     APP_TITLE,
@@ -35,7 +35,8 @@ class Spectra(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP_TITLE)
+        self.project_name = "New Project"  # Track current project name
+        self.setWindowTitle(f"{APP_TITLE} - {self.project_name}")
         self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         self.version = "1.1.0"
 
@@ -51,6 +52,7 @@ class Spectra(QMainWindow):
         self.confidence = DEFAULT_CONFIDENCE
         self.overlap = DEFAULT_OVERLAP
         self.sections_list: List[Section] = []
+        self.mode_label = None  # QLabel for mode indicator
 
         # Initialize managers
         self.menu_manager = MenuManager(self)
@@ -90,11 +92,15 @@ class Spectra(QMainWindow):
         self.menu_manager.create_menus()
 
         # Create panels
+        tab_widget = QTabWidget()
         sections_widget = self.sections_panel.create_panel()
-        main_splitter.addWidget(sections_widget)
+        tab_widget.addTab(sections_widget, "Sections")
+        main_splitter.addWidget(tab_widget)
 
+        tab_widget = QTabWidget()
         viewer_widget = self.viewer_panel.create_panel()
-        main_splitter.addWidget(viewer_widget)
+        tab_widget.addTab(viewer_widget, "Viewer")
+        main_splitter.addWidget(tab_widget)
 
         # Create results widget as a tab widget
         tab_widget = QTabWidget()
@@ -103,6 +109,10 @@ class Spectra(QMainWindow):
         tab_widget.addTab(objects_widget, "Objects")
         tab_widget.addTab(results_widget, "Results")
         main_splitter.addWidget(tab_widget)
+
+        # Create mode label in status bar
+        self.mode_label = QLabel("Mode: Normal")
+        self.statusBar().addPermanentWidget(self.mode_label)
 
         # Initialize widget sizes
         main_splitter.setSizes(MAIN_SPLITTER_SIZES)
@@ -120,6 +130,8 @@ class Spectra(QMainWindow):
         if self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.manual_box_drawn.connect(self.detection_manager.add_manual_detection)
             self.viewer_panel.pdf_viewer.bbox_changed.connect(self.detection_manager.on_bbox_changed)
+            self.viewer_panel.pdf_viewer.section_drawn.connect(self.on_section_drawn)
+            self.viewer_panel.pdf_viewer.section_right_clicked.connect(self.on_section_right_clicked)
 
     # Navigation methods (delegated to viewer panel)
     def first_page(self):
@@ -161,20 +173,54 @@ class Spectra(QMainWindow):
     def enter_add_object_mode(self):
         if self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.set_add_object_mode(True)
+        self.set_mode_label("Add Object")
 
     def exit_add_object_mode(self):
         if self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.set_add_object_mode(False)
+        self.set_mode_label("Normal")
+
+    def enter_add_section_mode(self):
+        """Enter section drawing mode"""
+        if self.viewer_panel.pdf_viewer:
+            self.viewer_panel.pdf_viewer.set_add_section_mode(True)
+        self.set_mode_label("Draw Section")
+
+    def exit_add_section_mode(self):
+        """Exit section drawing mode"""
+        if self.viewer_panel.pdf_viewer:
+            self.viewer_panel.pdf_viewer.set_add_section_mode(False)
+        self.set_mode_label("Normal")
+
+    def on_section_drawn(self, points):
+        """Handle when a new section is drawn"""
+        from sections.sections import add_section_with_points
+        add_section_with_points(self, points)
+
+    def on_section_right_clicked(self, section_index: int, global_pos=None):
+        """Handle right-click on a section"""
+        from sections.sections import show_section_context_menu
+        show_section_context_menu(self, section_index, global_pos=global_pos)
 
     # Project management methods (delegated to project manager)
     def new_project(self):
         self.project_manager.new_project()
+        self.project_name = "New Project"
+        self.update_window_title()
 
     def open_project(self):
-        self.project_manager.open_project()
+        project_file = self.project_manager.open_project()
+        if project_file:
+            self.project_name = os.path.splitext(os.path.basename(project_file))[0]
+        else:
+            self.project_name = "New Project"
+        self.update_window_title()
 
     def save_project(self):
-        self.project_manager.save_project()
+        project_file = self.project_manager.save_project()
+        if project_file:
+            self.project_name = os.path.splitext(os.path.basename(project_file))[0]
+            self.update_window_title()
 
     def open_pdf(self):
         self.project_manager.open_pdf()
@@ -337,7 +383,23 @@ class Spectra(QMainWindow):
             "- Middle Mouse Button: Pan around\n"
             "- Ctrl+Scroll: Zoom in/out (centered on mouse cursor)\n"
             "- Shift+Scroll: Pan left/right horizontally\n"
-            "- Scroll: Pan up/down vertically",
+            "- Scroll: Pan up/down vertically\n\n"
+            "Modes:\n"
+            "- Normal: Default mode for viewing and editing objects.\n"
+            "- Add Object: Add objects manually by clicking on the PDF.\n"
+            "- Draw Section: Draw sections by clicking and dragging on the PDF.\n\n"
+            "Keyboard Shortcuts:\n"
+            "- Ctrl+Space: Add object manually\n"
+            "- Ctrl+N: New project\n"
+            "- Ctrl+O: Open project\n"
+            "- Ctrl+S: Save project\n"
+            "- Ctrl+P: Open PDF\n"
+            "- Ctrl+Z: Undo\n"
+            "- Ctrl+Y: Redo\n"
+            "- Ctrl+X: Cut\n"
+            "- Ctrl+C: Copy\n"
+            "- Ctrl+V: Paste\n"
+            "- Ctrl+D: Delete\n"
         )
 
     def export_results_to_csv(self):
@@ -393,4 +455,12 @@ class Spectra(QMainWindow):
 
     @property
     def clipboard_detection(self):
-        return self.detection_manager.clipboard_detection 
+        return self.detection_manager.clipboard_detection
+
+    def set_mode_label(self, mode: str):
+        if self.mode_label:
+            self.mode_label.setText(f"Mode: {mode}")
+
+    def update_window_title(self):
+        """Update the window title with the current project name."""
+        self.setWindowTitle(f"{APP_TITLE} - {self.project_name}") 
