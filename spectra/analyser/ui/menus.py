@@ -34,10 +34,6 @@ class MenuManager:
         analysis_menu: QMenu = menu_bar.addMenu("Analysis")
         self._create_analysis_menu(analysis_menu)
 
-        # API menu
-        api_menu_obj: QMenu = menu_bar.addMenu("API")
-        self._create_api_menu(api_menu_obj)
-
         # About menu
         about_menu_obj: QMenu = menu_bar.addMenu("About")
         self._create_about_menu(about_menu_obj)
@@ -118,6 +114,12 @@ class MenuManager:
         add_object_action.triggered.connect(self.main_window.enter_add_object_mode)
         objects_menu.addAction(add_object_action)
 
+        objects_menu.addSeparator()
+
+        import_csv_action = QAction("Import CSV", self.main_window)
+        import_csv_action.triggered.connect(self.main_window.import_sections_csv)
+        objects_menu.addAction(import_csv_action)
+
     def _create_analysis_menu(self, analysis_menu):
         """Create Analysis menu items"""
         run_analysis_action = QAction("Run Analysis", self.main_window)
@@ -135,11 +137,11 @@ class MenuManager:
         set_overlap_action.triggered.connect(self.main_window.set_overlap)
         analysis_menu.addAction(set_overlap_action)
 
-    def _create_api_menu(self, api_menu_obj):
-        """Create API menu items"""
+        analysis_menu.addSeparator()
+
         set_api_action = QAction("Set API Key", self.main_window)
         set_api_action.triggered.connect(self.main_window.set_api_key)
-        api_menu_obj.addAction(set_api_action)
+        analysis_menu.addAction(set_api_action)
 
     def _create_about_menu(self, about_menu_obj):
         """Create About menu items"""

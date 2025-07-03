@@ -4,7 +4,14 @@ import re
 from typing import List
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QSplitter, QTabWidget, QVBoxLayout, QWidget, QLabel
+from PySide6.QtWidgets import (
+    QLabel,
+    QMainWindow,
+    QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from config.settings import (
     APP_TITLE,
@@ -22,7 +29,7 @@ from core.analysis_manager import AnalysisManager
 from core.detection_manager import DetectionManager
 from core.project_manager import ProjectManager
 from detection.types import Detection
-from sections.sections import Section
+from sections.sections import Section, import_sections_csv
 from ui.menus import MenuManager
 from ui.panels.objects_panel import ObjectsPanel
 from ui.panels.results_panel import ResultsPanel
@@ -303,6 +310,9 @@ class Spectra(QMainWindow):
 
     def update_results_table(self):
         self.results_panel.update_results_table()
+
+    def import_sections_csv(self):
+        import_sections_csv(self)
 
     def update_zoom_label(self, zoom_factor: float):
         self.viewer_panel.update_zoom_label(zoom_factor)

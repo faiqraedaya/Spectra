@@ -12,6 +12,7 @@ class Detection:
     source: str = "model"  # 'model' or 'manual'
     line_size: Optional[float] = None  # Optional per-object line size override
     count: int = 1  # Number of identical objects in the box
+    color: Optional[object] = None  # QColor or None, always set from section, not user-editable
 
     def to_dict(self):
         return {
@@ -35,5 +36,6 @@ class Detection:
             section=data.get('section', 'Unassigned'),
             source=data.get('source', 'model'),
             line_size=data.get('line_size', None),
-            count=data.get('count', 1)
+            count=data.get('count', 1),
+            color=data.get('color', None)  # Only set if present, but not user-editable
         )

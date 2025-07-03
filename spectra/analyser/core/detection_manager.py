@@ -165,9 +165,14 @@ class DetectionManager:
         """Assign a detection to the first section whose polyline it touches. Returns True if assigned."""
         from sections.sections import polyline_intersects_bbox
         for section in self.main_window.sections_list:
-            if polyline_intersects_bbox(section.points, detection.bbox):
-                detection.section = section.name
-                return True
+            for polyline in getattr(section, 'polylines', []):
+                # Optionally, only check polylines on the same page as the detection
+                if hasattr(detection, 'page_num') and hasattr(polyline, 'page'):
+                    if polyline.page != detection.page_num:
+                        continue
+                if polyline_intersects_bbox(polyline.points, detection.bbox):
+                    detection.section = section.name
+                    return True
         detection.section = "Unassigned"
         return False
 

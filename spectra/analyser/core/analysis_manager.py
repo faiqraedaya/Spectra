@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from detection.categories_map import get_category
 from detection.roboflow import RoboflowAnalysisThread
+from sections.sections import assign_objects_to_sections
 
 
 class AnalysisManager:
@@ -55,6 +56,8 @@ class AnalysisManager:
             d.name = get_category(d.name)
             
         self.main_window.detections = manual_detections + detections
+        from sections.sections import assign_objects_to_sections
+        assign_objects_to_sections(self.main_window)
         self.main_window.undo_stack.clear()
         self.main_window.redo_stack.clear()
         self.main_window.pdf_viewer.set_detections(self.main_window.detections)
