@@ -1,9 +1,9 @@
+# Spectra
+
 <p align="center">
   <img src="spectra/analyser/assets/images/spectra_splash.png" alt="Spectra Logo" />
 </p>
 <p style="text-align:center;"></p>
-
-# Spectra
 
 <p align="center">
    <i>
