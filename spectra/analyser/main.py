@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Spectra Analyser - Main entry point
+Spectra - Main entry point
 """
 
 import sys

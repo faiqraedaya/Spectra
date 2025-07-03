@@ -3,18 +3,18 @@ import os
 import shutil
 import tempfile
 import time
-from typing import List, Tuple, Optional, cast
+from typing import List, Optional, Tuple, cast
 
 from PIL import Image
-from PySide6.QtCore import QRect, Qt, Signal, QPoint
-from PySide6.QtGui import QFont, QMouseEvent, QPainter, QPen, QPixmap, QBrush, QPolygon
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtGui import QBrush, QFont, QMouseEvent, QPainter, QPen, QPixmap, QPolygon, QColor
 from PySide6.QtWidgets import QLabel, QMessageBox
 import fitz
 
 class PDFViewer(QLabel):
     """PDF Viewer with zoom and pan"""
     # UI Signals
-    zoom_changed = Signal(float)
+    zoom_changed = Signal(float) # zoom factor
     bbox_right_clicked = Signal(int)  # index of detection in self.detections
     manual_box_drawn = Signal(tuple)  # (x1, y1, x2, y2)
     bbox_changed = Signal(int, tuple)  # index, new bbox
@@ -74,7 +74,7 @@ class PDFViewer(QLabel):
         self.drag_offset = None
         self.resize_start_bbox = None
         self.resize_start_pos = None
-        self.handle_size = 16  # Make handles larger for easier grabbing
+        self.handle_size = 8  # Make handles larger for easier grabbing
         
 
     def load_pdf(self, pdf_path: str) -> bool:
@@ -186,11 +186,9 @@ class PDFViewer(QLabel):
         for idx, detection in enumerate(self.detections):
             bbox = detection.bbox
             x1, y1, x2, y2 = [int(coord * scale_factor) for coord in bbox]
-            # Draw rectangle (transparent fill, just outline)
-            if idx == self.selected_bbox_index:
-                pen = QPen(Qt.GlobalColor.blue, max(3, int(3 * scale_factor)))
-            else:
-                pen = QPen(Qt.GlobalColor.red, max(2, int(2 * scale_factor)))
+            # Use detection.color if set, else fallback
+            box_color = detection.color if getattr(detection, 'color', None) is not None else (Qt.GlobalColor.blue if idx == self.selected_bbox_index else Qt.GlobalColor.red)
+            pen = QPen(box_color, max(3, int(3 * scale_factor)) if idx == self.selected_bbox_index else max(2, int(2 * scale_factor)))
             painter.setPen(pen)
             painter.setBrush(QBrush(Qt.BrushStyle.NoBrush))  # Transparent fill
             painter.drawRect(x1, y1, x2-x1, y2-y1)
@@ -198,7 +196,7 @@ class PDFViewer(QLabel):
             label = f"{detection.name}: {detection.confidence:.2f}"
             label_width = max(150, int(150 * scale_factor))
             label_height = max(20, int(20 * scale_factor))
-            painter.fillRect(x1, y1-label_height, label_width, label_height, Qt.GlobalColor.red)
+            painter.fillRect(x1, y1-label_height, label_width, label_height, box_color)
             painter.setPen(QPen(Qt.GlobalColor.white, 1))
             painter.drawText(x1+2, y1-5, label)
             painter.setPen(pen)
@@ -636,12 +634,14 @@ class PDFViewer(QLabel):
         img_x, img_y = self.widget_to_image_coords(pos.x(), pos.y())
         
         for i, section in enumerate(self.sections):
-            if not section.points or len(section.points) < 2:
-                continue
-            
-            # Simple point-in-polygon test using ray casting
-            if self._point_in_polygon(img_x, img_y, section.points):
-                return i
+            for polyline in getattr(section, 'polylines', []):
+                if polyline.page != self.current_page + 1:
+                    continue
+                if not polyline.points or len(polyline.points) < 2:
+                    continue
+                # Simple point-in-polygon test using ray casting
+                if self._point_in_polygon(img_x, img_y, polyline.points):
+                    return i
         
         return None
 
@@ -717,42 +717,48 @@ class PDFViewer(QLabel):
         if not self.sections or not self.scaled_pixmap:
             return
         for section in self.sections:
-            if not section.points or len(section.points) < 2:
-                continue
-            widget_points = []
-            for img_x, img_y in section.points:
-                widget_x = img_x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-                widget_y = img_y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
-                widget_points.append(QPoint(int(widget_x), int(widget_y)))
-            if len(widget_points) < 2:
-                continue
-            pen_width = max(3, int(4 * self.zoom_factor))
-            if section.color:
-                painter.setPen(QPen(section.color, pen_width, Qt.PenStyle.SolidLine))
-            else:
-                painter.setPen(QPen(Qt.GlobalColor.blue, pen_width, Qt.PenStyle.SolidLine))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPolyline(QPolygon(widget_points))
-            # Draw section name label at the first point with border and background
-            label_point = widget_points[0]
-            label_font = QFont("Arial", max(14, int(16 * self.zoom_factor)), QFont.Weight.Bold)
-            painter.setFont(label_font)
-            label_text = section.name
-            metrics = painter.fontMetrics()
-            text_width = metrics.horizontalAdvance(label_text)
-            text_height = metrics.height()
-            padding = 8
-            rect_x = label_point.x() + 6
-            rect_y = label_point.y() - text_height - 6
-            rect_w = text_width + 2 * padding
-            rect_h = text_height + 2 * padding // 2
-            # Draw background
-            painter.setBrush(QBrush(Qt.GlobalColor.white))
-            painter.setPen(QPen(section.color if section.color else Qt.GlobalColor.blue, 3))
-            painter.drawRect(rect_x, rect_y, rect_w, rect_h)
-            # Draw text
-            painter.setPen(QPen(Qt.GlobalColor.black, 1))
-            painter.drawText(rect_x + padding, rect_y + text_height + padding // 4 - 2, label_text)
+            for polyline in getattr(section, 'polylines', []):
+                if polyline.page != self.current_page + 1:
+                    continue
+                if not polyline.points or len(polyline.points) < 2:
+                    continue
+                widget_points = []
+                for img_x, img_y in polyline.points:
+                    widget_x = img_x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
+                    widget_y = img_y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
+                    widget_points.append(QPoint(int(widget_x), int(widget_y)))
+                if len(widget_points) < 2:
+                    continue
+                # Make polyline twice as thick and 50% opacity
+                pen_width = max(12, int(16 * self.zoom_factor))
+                if section.color:
+                    color = QColor(section.color)
+                else:
+                    color = QColor(Qt.GlobalColor.blue)
+                color.setAlpha(128)  # 50% opacity
+                painter.setPen(QPen(color, pen_width, Qt.PenStyle.SolidLine))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPolyline(QPolygon(widget_points))
+                # Draw section name label at the first point with border and background
+                label_point = widget_points[0]
+                label_font = QFont("Arial", max(14, int(16 * self.zoom_factor)), QFont.Weight.Bold)
+                painter.setFont(label_font)
+                label_text = section.name
+                metrics = painter.fontMetrics()
+                text_width = metrics.horizontalAdvance(label_text)
+                text_height = metrics.height()
+                padding = 8
+                rect_x = label_point.x() + 6
+                rect_y = label_point.y() - text_height - 6
+                rect_w = text_width + 2 * padding
+                rect_h = text_height + 2 * padding // 2
+                # Draw background
+                painter.setBrush(QBrush(Qt.GlobalColor.white))
+                painter.setPen(QPen(section.color if section.color else Qt.GlobalColor.blue, 3))
+                painter.drawRect(rect_x, rect_y, rect_w, rect_h)
+                # Draw text
+                painter.setPen(QPen(Qt.GlobalColor.black, 1))
+                painter.drawText(rect_x + padding, rect_y + text_height + padding // 4 - 2, label_text)
 
     def _draw_section_preview(self, painter: QPainter):
         """Draw preview of section being drawn"""
@@ -827,10 +833,7 @@ class PDFViewer(QLabel):
             # Calculate mouse position relative to image
             rel_x = (mouse_x - img_x) / self.zoom_factor
             rel_y = (mouse_y - img_y) / self.zoom_factor
-            
-            # Store old zoom
-            old_zoom = self.zoom_factor
-            
+                        
             # Perform zoom
             if angle > 0:
                 self.zoom_in()

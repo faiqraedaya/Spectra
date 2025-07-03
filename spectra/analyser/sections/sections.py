@@ -1,11 +1,11 @@
-from typing import Optional, List, Tuple
 import colorsys
-import math
 import copy
+import math
+from typing import List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
 RAINBOW_COLORS = 12  # Number of distinct colors before looping
 
@@ -15,12 +15,24 @@ def get_next_rainbow_color(index: int) -> QColor:
     rgb = colorsys.hsv_to_rgb(hue, 0.85, 0.95)
     return QColor(int(rgb[0]*255), int(rgb[1]*255), int(rgb[2]*255))
 
+class Polyline:
+    def __init__(self, points, page):
+        self.points = points  # list of (x, y) tuples
+        self.page = page      # int
+
+    def to_dict(self):
+        return {'points': self.points, 'page': self.page}
+
+    @staticmethod
+    def from_dict(data):
+        return Polyline(data['points'], data['page'])
+
 class Section:
-    """Represents a section with name, line size, polyline points, and color properties"""
-    def __init__(self, name: str, line_size: Optional[float] = None, points: Optional[List[Tuple[float, float]]] = None, color: Optional[QColor] = None, color_index: Optional[int] = None):
+    """Represents a section with name, line size, multiple polylines, and color properties"""
+    def __init__(self, name: str, line_size: Optional[float] = None, polylines: Optional[List['Polyline']] = None, color: Optional[QColor] = None, color_index: Optional[int] = None):
         self.name = name
         self.line_size = line_size
-        self.points = points or []
+        self.polylines = polylines or []  # List of Polyline objects
         # Use rainbow color cycling if no color provided
         if color is not None:
             self.color = color
@@ -36,7 +48,7 @@ class Section:
         return {
             'name': self.name,
             'line_size': self.line_size,
-            'points': self.points,
+            'polylines': [polyline.to_dict() for polyline in self.polylines],
             'color': self.color.name() if self.color else None
         }
 
@@ -45,11 +57,11 @@ class Section:
         color = None
         if data.get('color'):
             color = QColor(data['color'])
-        
+        polylines = [Polyline.from_dict(p) for p in data.get('polylines', [])]
         return Section(
             name=data.get('name', ''),
             line_size=data.get('line_size', None),
-            points=data.get('points', []),
+            polylines=polylines,
             color=color
         )
 
@@ -203,20 +215,38 @@ def update_section_filter_dropdown(self):
 def add_section_with_points(self, points):
     from ui.dialogs.section_dialog import SectionDialog
     base_name = "New Section"
-    existing_names = set(section.name for section in self.sections_list)
+    existing_names = [section.name for section in self.sections_list]
     i = 1
     while f"{base_name} {i}" in existing_names:
         i += 1
     new_name = f"{base_name} {i}"
     color_index = len(self.sections_list)
     default_color = get_next_rainbow_color(color_index)
-    dialog = SectionDialog(self, new_name, None, default_color)
+    initial_polylines = [Polyline(points, getattr(self, 'current_page', 1))]
+    dialog = SectionDialog(self, new_name, None, default_color, polylines=initial_polylines, existing_section_names=existing_names, existing_sections=self.sections_list)
     if not dialog.exec():
         return  # User cancelled
     name = dialog.get_name()
+    polylines = dialog.get_polylines()
+    # If the name matches an existing section, add the polyline to that section
+    for section in self.sections_list:
+        if section.name == name:
+            # Add the new polyline(s) to the existing section, set line size and color to match
+            for poly in polylines:
+                poly.page = getattr(self, 'current_page', 1)
+                section.polylines.append(poly)
+            update_sections_table(self)
+            update_section_filter_dropdown(self)
+            if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
+                self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
+            if self.sections_panel.sections_table:
+                self.sections_panel.sections_table.selectRow(self.sections_list.index(section))
+            assign_objects_to_sections(self)
+            return
+    # Otherwise, create a new section
     line_size = dialog.get_line_size()
     color = dialog.get_color()
-    new_section = Section(name, line_size=line_size, points=points, color=color)
+    new_section = Section(name, line_size=line_size, polylines=polylines, color=color)
     self.sections_list.append(new_section)
     update_sections_table(self)
     update_section_filter_dropdown(self)
@@ -282,21 +312,23 @@ def show_section_context_menu(self, section_index: int, global_pos=None):
         menu.exec(cursor_pos)
 
 def edit_section_points(self, section_index: int):
-    """Edit the points of a section"""
+    """Edit the polylines of a section"""
     if section_index < 0 or section_index >= len(self.sections_list):
         return
-    
     section = self.sections_list[section_index]
-    
-    # For now, we'll just show a message. In a full implementation,
-    # this would open a dialog to edit the points
-    from PySide6.QtWidgets import QMessageBox
-    QMessageBox.information(
-        self,
-        "Edit Section",
-        f"Editing points for section '{section.name}'.\n"
-        "This feature will be implemented in a future update."
-    )
+    from ui.dialogs.section_dialog import SectionDialog
+    dialog = SectionDialog(self, section.name, section.line_size, section.color, polylines=list(section.polylines))
+    if not dialog.exec():
+        return  # User cancelled
+    section.name = dialog.get_name()
+    section.line_size = dialog.get_line_size()
+    section.color = dialog.get_color()
+    section.polylines = dialog.get_polylines()
+    update_sections_table(self)
+    update_section_filter_dropdown(self)
+    if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
+        self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
+    assign_objects_to_sections(self)
 
 def cut_section(self, section_index: int):
     """Cut a section (copy and delete)"""
@@ -386,18 +418,25 @@ def delete_section_from_context(self, section_index: int):
             self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
 
 def get_section_for_bbox(bbox, sections_list):
-    """Return the name of the most recently added section whose polyline crosses the bbox, or 'Unassigned'."""
+    """Return the name of the most recently added section whose any polyline crosses the bbox, or 'Unassigned'."""
     for section in reversed(sections_list):
-        if polyline_intersects_bbox(section.points, bbox):
-            return section.name
+        for polyline in getattr(section, 'polylines', []):
+            if polyline_intersects_bbox(polyline.points, bbox):
+                return section.name
     return "Unassigned"
 
 def assign_objects_to_sections(self):
-    """Assign each detection to the most recently added section whose polyline crosses its bbox."""
+    """Assign each detection to the most recently added section whose polyline crosses its bbox, and set its color property."""
     if not hasattr(self, 'detections') or not hasattr(self, 'sections_list'):
         return
     for det in self.detections:
         det.section = get_section_for_bbox(det.bbox, self.sections_list)
+        # Set color property
+        det.color = None
+        for section in self.sections_list:
+            if section.name == det.section:
+                det.color = section.color
+                break
 
 def polyline_intersects_bbox(points, bbox):
     """Return True if any segment of the polyline intersects the bbox."""

@@ -1,8 +1,15 @@
 from typing import Optional
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QComboBox, 
-    QLineEdit, QDialogButtonBox, QMessageBox
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QVBoxLayout,
 )
+
 from detection.categories_map import get_all_frequency_categories
 from detection.types import Detection
 
