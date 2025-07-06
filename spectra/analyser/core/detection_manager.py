@@ -62,6 +62,15 @@ class DetectionManager:
                 h = new_det.bbox[3] - new_det.bbox[1]
                 new_det.bbox = (int(img_x), int(img_y), int(img_x + w), int(img_y + h))
                 new_det.page_num = self.main_window.pdf_viewer.current_page + 1
+            else:
+                # Offset the bbox slightly to avoid overlap when pasting without position
+                bbox = list(new_det.bbox)
+                bbox[0] += 20  # x1
+                bbox[1] += 20  # y1  
+                bbox[2] += 20  # x2
+                bbox[3] += 20  # y2
+                new_det.bbox = tuple(bbox)
+                new_det.page_num = self.main_window.pdf_viewer.current_page + 1
                 
             self.main_window.detections.append(new_det)
             # Assign section by polyline if possible
@@ -80,10 +89,22 @@ class DetectionManager:
     def delete_detection(self, idx: int):
         """Delete a detection"""
         if idx is not None and 0 <= idx < len(self.main_window.detections):
-            self.main_window.detections.pop(idx)
-            self.main_window.update_objects_table()
-            self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
-            self.main_window.update_results_table()
+            detection = self.main_window.detections[idx]
+            
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self.main_window,
+                "Delete Object",
+                f"Are you sure you want to delete '{detection.name}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.main_window.detections.pop(idx)
+                self.main_window.update_objects_table()
+                self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
+                self.main_window.update_results_table()
 
     def edit_detection(self, idx: int):
         """Edit a detection's properties"""
@@ -207,9 +228,9 @@ class DetectionManager:
         menu = QMenu(self.main_window)
         cut_action = QAction("Cut", self.main_window)
         copy_action = QAction("Copy", self.main_window)
-        paste_action = QAction("Paste", self.main_window)
+        paste_action = QAction("Paste Object", self.main_window)
         edit_action = QAction("Edit Object", self.main_window)
-        delete_action = QAction("Delete Object", self.main_window)
+        delete_action = QAction("Delete", self.main_window)
         menu.addAction(cut_action)
         menu.addAction(copy_action)
         menu.addAction(paste_action)
@@ -230,8 +251,16 @@ class DetectionManager:
     def on_background_right_clicked(self, pos: QPoint):
         """Handle right-click on background"""
         menu = QMenu(self.main_window)
-        paste_action = QAction("Paste", self.main_window)
+        paste_action = QAction("Paste Object", self.main_window)
         menu.addAction(paste_action)
         paste_action.setEnabled(self.clipboard_detection is not None)
         paste_action.triggered.connect(lambda: self.paste_detection(None, pos))
+        # Add Paste Polyline if available
+        pdf_viewer = getattr(self.main_window, 'pdf_viewer', None)
+        if pdf_viewer is None and hasattr(self.main_window, 'viewer_panel'):
+            pdf_viewer = getattr(self.main_window.viewer_panel, 'pdf_viewer', None)
+        if pdf_viewer is not None and getattr(pdf_viewer, '_polyline_clipboard', None) is not None:
+            paste_poly_action = QAction("Paste Polyline", self.main_window)
+            menu.addAction(paste_poly_action)
+            paste_poly_action.triggered.connect(lambda: pdf_viewer.paste_polyline_at_pos(pos))
         menu.exec(self.main_window.cursor().pos()) 

@@ -1,14 +1,23 @@
+import copy as _copy
 import io
 import os
 import shutil
 import tempfile
-import time
 from typing import List, Optional, Tuple, cast
 
 from PIL import Image
 from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QBrush, QFont, QMouseEvent, QPainter, QPen, QPixmap, QPolygon, QColor
-from PySide6.QtWidgets import QLabel, QMessageBox
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygon,
+)
+from PySide6.QtWidgets import QLabel, QMenu, QMessageBox
 import fitz
 
 class PDFViewer(QLabel):
@@ -76,6 +85,15 @@ class PDFViewer(QLabel):
         self.resize_start_pos = None
         self.handle_size = 8  # Make handles larger for easier grabbing
         
+        # Polyline selection state
+        self.selected_section_index = None  # Index of selected section
+        self.selected_polyline_index = None  # Index of selected polyline within section
+        self._polyline_clipboard = None  # For cut/copy/paste
+        self._polyline_dragging = False
+        self._polyline_drag_start_pos = None
+        self._polyline_drag_start_points = None
+        self._polyline_point_drag_idx = None
+        self.debug_mode = True  # Set to True to show detection areas
 
     def load_pdf(self, pdf_path: str) -> bool:
         """Load PDF and convert pages to images"""
@@ -235,30 +253,33 @@ class PDFViewer(QLabel):
         return None
 
     def mousePressEvent(self, event: QMouseEvent):
+        # Handle drawing modes first
         if self.add_object_mode:
             if event.button() == Qt.MouseButton.LeftButton:
+                # Start drawing a box
                 self.drawing_box = True
                 self.box_start = event.pos()
                 self.box_end = event.pos()
-                self.setCursor(Qt.CursorShape.CrossCursor)  # Always show plus cursor in add object mode
+                self.update()
+                return
             elif event.button() == Qt.MouseButton.RightButton:
+                # Cancel object drawing and exit mode
+                self.drawing_box = False
+                self.box_start = None
+                self.box_end = None
                 self.set_add_object_mode(False)
                 main_window = self.get_main_window()
                 if main_window is not None:
                     main_window.exit_add_object_mode()
-            elif event.button() == Qt.MouseButton.MiddleButton and not self.drawing_box:
-                self.is_panning = True
-                self.pan_start_pos = event.pos()
-            self.update()
-            return
+                return
         
         if self.add_section_mode:
             if event.button() == Qt.MouseButton.LeftButton:
                 # Convert widget coordinates to image coordinates
                 img_x, img_y = self.widget_to_image_coords(event.pos().x(), event.pos().y())
-                
                 # Check for double-click to finish section
                 if hasattr(self, '_last_click_time') and hasattr(self, '_last_click_pos'):
+                    import time
                     current_time = time.time()
                     if (current_time - self._last_click_time < 0.3 and 
                         abs(event.pos().x() - self._last_click_pos.x()) < 5 and 
@@ -270,16 +291,15 @@ class PDFViewer(QLabel):
                             self.drawing_section = False
                         self.update()
                         return
-                
                 # Single click - add point
                 self.section_points.append((img_x, img_y))
                 self.drawing_section = True
-                
                 # Store click info for double-click detection
+                import time
                 self._last_click_time = time.time()
                 self._last_click_pos = event.pos()
-                
                 self.update()
+                return
             elif event.button() == Qt.MouseButton.RightButton:
                 if not self.section_points:
                     # Exit draw mode if not currently drawing
@@ -294,60 +314,230 @@ class PDFViewer(QLabel):
                     if not self.section_points:
                         self.drawing_section = False
                 self.update()
+                return
             elif event.button() == Qt.MouseButton.MiddleButton:
                 self.is_panning = True
                 self.pan_start_pos = event.pos()
-            return
+                self.update()
+                return
+
+        # 1. Handle object (bbox) selection and resizing on left click
         if event.button() == Qt.MouseButton.LeftButton:
-            # Check if clicking on a handle or bbox
-            idx = self.get_bbox_at_pos(event.pos())
-            if idx is not None:
-                self.selected_bbox_index = idx
-                bbox = self.detections[idx].bbox
+            if self.scaled_pixmap is None:
+                self.selected_section_index = None
+                self.selected_polyline_index = None
+                self.selected_bbox_index = None
+                self.update()
+                return
+            
+            # Check for bbox selection first
+            bbox_idx = self.get_bbox_at_pos(event.pos())
+            if bbox_idx is not None:
+                # Check if clicking on a resize handle
+                bbox = self.detections[bbox_idx].bbox
                 scale = self.zoom_factor
                 x1, y1, x2, y2 = [int(c * scale) for c in bbox]
                 # Adjust mouse pos for pan/centering offset
-                if self.scaled_pixmap:
-                    x_offset = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-                    y_offset = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
-                    adj_pos = QPoint(event.pos().x() - x_offset, event.pos().y() - y_offset)
-                else:
-                    adj_pos = event.pos()
+                x_offset = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
+                y_offset = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
+                adj_pos = QPoint(event.pos().x() - x_offset, event.pos().y() - y_offset)
                 handle = self.handle_at_pos(adj_pos, (x1, y1, x2, y2))
+                
                 if handle:
+                    # Start resizing
                     self.resizing = True
                     self.resize_handle = handle
-                    self.resize_start_bbox = tuple(self.detections[idx].bbox)  # always tuple
+                    self.selected_bbox_index = bbox_idx
+                    self.resize_start_bbox = list(bbox)
                     self.resize_start_pos = event.pos()
+                    self.update()
+                    return
                 else:
                     # Start dragging
                     self.dragging = True
-                    px, py = int(event.pos().x()), int(event.pos().y())
-                    self.drag_offset = (px - x1, py - y1, x2 - px, y2 - py)
+                    self.selected_bbox_index = bbox_idx
+                    self.drag_offset = (event.pos().x(), event.pos().y())
+                    self.drag_start_bbox = list(bbox)  # Store original bbox position
+                    self.update()
+                    return
             else:
-                self.selected_bbox_index = None  # Deselect if clicking empty space
-            self.update()
-        elif event.button() == Qt.MouseButton.RightButton:
-            # Check for section first, then bbox
-            section_idx = self.get_section_at_pos(event.pos())
-            if section_idx is not None:
-                self.section_right_clicked.emit(section_idx, event.globalPos())
+                # No bbox clicked, clear selection
+                self.selected_bbox_index = None
+                self.dragging = False
+                self.resizing = False
+                self.resize_handle = None
+                self.resize_start_bbox = None
+                self.resize_start_pos = None
+                self.drag_offset = None
+                self.drag_start_bbox = None
+                self.update()  # Add this line to refresh the display
+            # Check for polyline selection with proper priority
+            nearest_section = None
+            nearest_polyline = None
+            nearest_dist = float('inf')
+            nearest_s_idx = None
+            nearest_p_idx = None
+            nearest_seg = None
+            nearest_point_idx = None
+            
+            for s_idx, section in enumerate(self.sections):
+                for p_idx, polyline in enumerate(getattr(section, 'polylines', [])):
+                    if polyline.page != self.current_page + 1:
+                        continue
+                    if not polyline.points or len(polyline.points) < 2:
+                        continue
+                    
+                    widget_points = []
+                    if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
+                        width = int(self.width())
+                        height = int(self.height())
+                        image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
+                        for x, y in polyline.points:
+                            widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
+                            widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
+                            widget_points.append(QPoint(widget_x, widget_y))
+                    
+                    # Check for point hits FIRST (higher priority)
+                    handle_size = max(20, int(25 * self.zoom_factor))  # Larger hit area
+                    for idx, pt in enumerate(widget_points):
+                        dist = (event.pos() - pt).manhattanLength()
+                        if dist < handle_size and dist < nearest_dist:
+                            nearest_section = section
+                            nearest_polyline = polyline
+                            nearest_dist = dist
+                            nearest_s_idx = s_idx
+                            nearest_p_idx = p_idx
+                            nearest_seg = ('point', idx)
+                            nearest_point_idx = idx
+            
+            # Only check for segment hits if no point was hit
+            if nearest_seg is None or nearest_seg[0] != 'point':
+                for s_idx, section in enumerate(self.sections):
+                    for p_idx, polyline in enumerate(getattr(section, 'polylines', [])):
+                        if polyline.page != self.current_page + 1:
+                            continue
+                        if not polyline.points or len(polyline.points) < 2:
+                            continue
+                        
+                        widget_points = []
+                        if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
+                            width = int(self.width())
+                            height = int(self.height())
+                            image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
+                            for x, y in polyline.points:
+                                widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
+                                widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
+                                widget_points.append(QPoint(widget_x, widget_y))
+                        
+                        # Check for segment hits
+                        for i in range(len(widget_points) - 1):
+                            a = widget_points[i]
+                            b = widget_points[i+1]
+                            abx = b.x() - a.x()
+                            aby = b.y() - a.y()
+                            apx = event.pos().x() - a.x()
+                            apy = event.pos().y() - a.y()
+                            ab_len_sq = abx * abx + aby * aby
+                            t = 0 if ab_len_sq == 0 else max(0, min(1, (apx * abx + apy * aby) / ab_len_sq))
+                            closest_x = a.x() + t * abx
+                            closest_y = a.y() + t * aby
+                            dist_sq = (event.pos().x() - closest_x) ** 2 + (event.pos().y() - closest_y) ** 2
+                            if dist_sq < 144 and dist_sq < nearest_dist ** 2:  # 12px threshold
+                                nearest_section = section
+                                nearest_polyline = polyline
+                                nearest_dist = dist_sq ** 0.5
+                                nearest_s_idx = s_idx
+                                nearest_p_idx = p_idx
+                                nearest_seg = ('segment', i)
+            
+            # Select the nearest polyline if any
+            if nearest_section is not None:
+                self.selected_section_index = nearest_s_idx
+                self.selected_polyline_index = nearest_p_idx
+                self.update()
+                
+                # Handle point drag with higher priority
+                if nearest_seg and nearest_seg[0] == 'point':
+                    self._polyline_point_drag_idx = nearest_seg[1]
+                    return
+                # Handle segment drag only if no point was selected
+                elif nearest_seg and nearest_seg[0] == 'segment':
+                    self._polyline_dragging = True
+                    self._polyline_drag_start_pos = event.pos()
+                    if self.selected_section_index is not None and self.selected_polyline_index is not None:
+                        s_idx = int(self.selected_section_index)
+                        p_idx = int(self.selected_polyline_index)
+                        section = self.sections[s_idx]
+                        polyline = section.polylines[p_idx]
+                        self._polyline_drag_start_points = [tuple(pt) for pt in polyline.points]
+                    return
             else:
-                idx = self.get_bbox_at_pos(event.pos())
-                if idx is not None:
-                    main_window = self.get_main_window()
-                    if main_window is not None and hasattr(main_window, 'on_bbox_right_clicked'):
-                        main_window.on_bbox_right_clicked(idx, event.globalPos())
-                    else:
-                        self.bbox_right_clicked.emit(idx)
-                else:
-                    if hasattr(self, 'background_right_clicked'):
-                        self.background_right_clicked.emit(event.pos())
-            self.update()
+                self.selected_section_index = None
+                self.selected_polyline_index = None
+                self.update()
+                return
+        # 4. Right-click logic for context menu
+        if event.button() == Qt.MouseButton.RightButton:
+            # Check for bbox right-click first
+            bbox_idx = self.get_bbox_at_pos(event.pos())
+            if bbox_idx is not None:
+                self.bbox_right_clicked.emit(bbox_idx)
+                return
+            
+            # Check for section right-click
+            if self.selected_section_index is not None and self.selected_polyline_index is not None:
+                if self.scaled_pixmap is None:
+                    return
+                if self.selected_section_index is None or self.selected_polyline_index is None:
+                    return
+                s_idx = int(self.selected_section_index)
+                p_idx = int(self.selected_polyline_index)
+                section = self.sections[s_idx]
+                polyline = section.polylines[p_idx]
+                widget_points = []
+                if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
+                    width = int(self.width())
+                    height = int(self.height())
+                    image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
+                    for x, y in polyline.points:
+                        widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
+                        widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
+                        widget_points.append(QPoint(widget_x, widget_y))
+                # Check for handle hit
+                for idx, pt in enumerate(widget_points):
+                    handle_size = max(20, int(25 * self.zoom_factor))
+                    if (event.pos() - pt).manhattanLength() < handle_size:
+                        self.show_polyline_point_context_menu(idx, event.globalPos())
+                        return
+                # Check for segment hit
+                for i in range(len(widget_points) - 1):
+                    a = widget_points[i]
+                    b = widget_points[i+1]
+                    abx = b.x() - a.x()
+                    aby = b.y() - a.y()
+                    apx = event.pos().x() - a.x()
+                    apy = event.pos().y() - a.y()
+                    ab_len_sq = abx * abx + aby * aby
+                    t = 0 if ab_len_sq == 0 else max(0, min(1, (apx * abx + apy * aby) / ab_len_sq))
+                    closest_x = a.x() + t * abx
+                    closest_y = a.y() + t * aby
+                    dist_sq = (event.pos().x() - closest_x) ** 2 + (event.pos().y() - closest_y) ** 2
+                    if dist_sq < 100:
+                        self.show_polyline_add_point_context_menu(i + 1, (closest_x, closest_y), event.globalPos())
+                        return
+                # Otherwise, show section context menu
+                self.show_polyline_context_menu(self.selected_section_index, self.selected_polyline_index, event.globalPos())
+                return
+            
+            # Background right-click - emit signal for context menu
+            self.background_right_clicked.emit(event.pos())
+            return
         elif event.button() == Qt.MouseButton.MiddleButton:
             self.is_panning = True
             self.pan_start_pos = event.pos()
             self.update()
+        else:
+            super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self.add_object_mode:
@@ -432,59 +622,132 @@ class PDFViewer(QLabel):
             if self.resize_handle in handle_cursor_map:
                 self.setCursor(handle_cursor_map[self.resize_handle])
             return
-        if self.dragging and self.selected_bbox_index is not None and self.drag_offset is not None:
+        if self.dragging and self.selected_bbox_index is not None and self.drag_offset is not None and self.drag_start_bbox is not None:
             idx = self.selected_bbox_index
             bbox = list(self.detections[idx].bbox)
-            scale = self.zoom_factor
             w = bbox[2] - bbox[0]
             h = bbox[3] - bbox[1]
-            px, py = int(event.pos().x()), int(event.pos().y())
-            dx = (px - self.drag_offset[0]) / scale
-            dy = (py - self.drag_offset[1]) / scale
-            bbox[0] = int(round(dx))
-            bbox[1] = int(round(dy))
+            
+            # Calculate mouse movement in widget coordinates
+            mouse_delta_x = event.pos().x() - self.drag_offset[0]
+            mouse_delta_y = event.pos().y() - self.drag_offset[1]
+            
+            # Convert mouse delta to image coordinates
+            delta_img_x = mouse_delta_x / self.zoom_factor
+            delta_img_y = mouse_delta_y / self.zoom_factor
+            
+            # Apply the delta to the original bbox position
+            bbox[0] = int(round(self.drag_start_bbox[0] + delta_img_x))
+            bbox[1] = int(round(self.drag_start_bbox[1] + delta_img_y))
             bbox[2] = bbox[0] + w
             bbox[3] = bbox[1] + h
+            
             # Clamp to image bounds
             bbox[0] = max(0, min(bbox[0], bbox[2]-1))
             bbox[1] = max(0, min(bbox[1], bbox[3]-1))
             bbox[2] = max(bbox[0]+1, bbox[2])
             bbox[3] = max(bbox[1]+1, bbox[3])
+            
             self.detections[idx].bbox = cast(Tuple[int, int, int, int], tuple(int(round(v)) for v in bbox[:4]))
             self.update_display()
             self.bbox_changed.emit(idx, self.detections[idx].bbox)
             self.setCursor(Qt.CursorShape.SizeAllCursor)
             return
+        # Polyline drag
+        if self._polyline_dragging and self._polyline_drag_start_pos is not None and self._polyline_drag_start_points is not None:
+            if self.scaled_pixmap is None:
+                return
+            if self.selected_section_index is not None and self.selected_polyline_index is not None:
+                s_idx = int(self.selected_section_index)
+                p_idx = int(self.selected_polyline_index)
+                section = self.sections[s_idx]
+                polyline = section.polylines[p_idx]
+                dx = event.pos().x() - self._polyline_drag_start_pos.x()
+                dy = event.pos().y() - self._polyline_drag_start_pos.y()
+                new_points = []
+                for (x, y) in self._polyline_drag_start_points:
+                    img_x, img_y = self.widget_to_image_coords(
+                        int(x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0] + dx),
+                        int(y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1] + dy)
+                    )
+                    new_points.append((img_x, img_y))
+                polyline.points = new_points
+                self.setCursor(Qt.CursorShape.SizeAllCursor)  # Show move cursor during polyline drag
+                self.update()
+                return
+        # Polyline point drag
+        if self._polyline_point_drag_idx is not None:
+            if self.selected_section_index is not None and self.selected_polyline_index is not None:
+                s_idx = int(self.selected_section_index)
+                p_idx = int(self.selected_polyline_index)
+                section = self.sections[s_idx]
+                polyline = section.polylines[p_idx]
+                idx = self._polyline_point_drag_idx
+                # Convert widget pos to image coords
+                img_x, img_y = self.widget_to_image_coords(event.pos().x(), event.pos().y())
+                polyline.points[idx] = (img_x, img_y)
+                self.setCursor(Qt.CursorShape.SizeAllCursor)  # Show move cursor during point drag
+                self.update()
+                return
         # Not dragging or resizing: set cursor based on hover
-        idx = self.get_bbox_at_pos(event.pos())
-        if idx is not None:
-            bbox = self.detections[idx].bbox
-            scale = self.zoom_factor
-            x1, y1, x2, y2 = [int(c * scale) for c in bbox]
-            # Adjust mouse pos for pan/centering offset
-            if self.scaled_pixmap:
-                x_offset = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-                y_offset = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
-                adj_pos = QPoint(event.pos().x() - x_offset, event.pos().y() - y_offset)
-            else:
-                adj_pos = event.pos()
-            handle = self.handle_at_pos(adj_pos, (x1, y1, x2, y2))
-            handle_cursor_map = {
-                'tl': Qt.CursorShape.SizeFDiagCursor,
-                'br': Qt.CursorShape.SizeFDiagCursor,
-                'tr': Qt.CursorShape.SizeBDiagCursor,
-                'bl': Qt.CursorShape.SizeBDiagCursor,
-                'l': Qt.CursorShape.SizeHorCursor,
-                'r': Qt.CursorShape.SizeHorCursor,
-                't': Qt.CursorShape.SizeVerCursor,
-                'b': Qt.CursorShape.SizeVerCursor,
-            }
-            if handle in handle_cursor_map:
-                self.setCursor(handle_cursor_map[handle])
-            else:
-                self.setCursor(Qt.CursorShape.SizeAllCursor)
-        else:
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+        # Check for polyline point hover first with larger hit area
+        if not self.add_object_mode and not self.add_section_mode:
+            point_hover = False
+            if self.selected_section_index is not None and self.selected_polyline_index is not None:
+                s_idx = int(self.selected_section_index)
+                p_idx = int(self.selected_polyline_index)
+                section = self.sections[s_idx]
+                polyline = section.polylines[p_idx]
+                
+                if polyline.page == self.current_page + 1 and self.scaled_pixmap:
+                    widget_points = []
+                    width = int(self.width())
+                    height = int(self.height())
+                    image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
+                    for x, y in polyline.points:
+                        widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
+                        widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
+                        widget_points.append(QPoint(widget_x, widget_y))
+                    
+                    # Check if hovering over any point with larger hit area
+                    handle_size = max(20, int(25 * self.zoom_factor))
+                    for pt in widget_points:
+                        if (event.pos() - pt).manhattanLength() <= handle_size:
+                            self.setCursor(Qt.CursorShape.PointingHandCursor)  # Different cursor for points
+                            point_hover = True
+                            break
+            
+            if not point_hover:
+                # Check for bbox hover
+                idx = self.get_bbox_at_pos(event.pos())
+                if idx is not None:
+                    bbox = self.detections[idx].bbox
+                    scale = self.zoom_factor
+                    x1, y1, x2, y2 = [int(c * scale) for c in bbox]
+                    # Adjust mouse pos for pan/centering offset
+                    if self.scaled_pixmap:
+                        x_offset = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
+                        y_offset = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
+                        adj_pos = QPoint(event.pos().x() - x_offset, event.pos().y() - y_offset)
+                    else:
+                        adj_pos = event.pos()
+                    handle = self.handle_at_pos(adj_pos, (x1, y1, x2, y2))
+                    handle_cursor_map = {
+                        'tl': Qt.CursorShape.SizeFDiagCursor,
+                        'br': Qt.CursorShape.SizeFDiagCursor,
+                        'tr': Qt.CursorShape.SizeBDiagCursor,
+                        'bl': Qt.CursorShape.SizeBDiagCursor,
+                        'l': Qt.CursorShape.SizeHorCursor,
+                        'r': Qt.CursorShape.SizeHorCursor,
+                        't': Qt.CursorShape.SizeVerCursor,
+                        'b': Qt.CursorShape.SizeVerCursor,
+                    }
+                    if handle in handle_cursor_map:
+                        self.setCursor(handle_cursor_map[handle])
+                    else:
+                        self.setCursor(Qt.CursorShape.SizeAllCursor)
+                else:
+                    self.setCursor(Qt.CursorShape.ArrowCursor)
         if self.is_panning and self.pan_start_pos is not None:
             delta = event.pos() - self.pan_start_pos
             self.image_offset[0] += delta.x()
@@ -495,21 +758,29 @@ class PDFViewer(QLabel):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        if self.add_object_mode and self.drawing_box and event.button() == Qt.MouseButton.LeftButton:
-            self.drawing_box = False
-            if self.box_start is not None and self.box_end is not None and hasattr(self.box_start, 'isNull') and hasattr(self.box_end, 'isNull') and not self.box_start.isNull() and not self.box_end.isNull():
-                x1 = min(self.box_start.x(), self.box_end.x())
-                y1 = min(self.box_start.y(), self.box_end.y())
-                x2 = max(self.box_start.x(), self.box_end.x())
-                y2 = max(self.box_start.y(), self.box_end.y())
-                # Convert widget coords to image coords
-                img_x1, img_y1 = self.widget_to_image_coords(x1, y1)
-                img_x2, img_y2 = self.widget_to_image_coords(x2, y2)
-                self.manual_box_drawn.emit((int(img_x1), int(img_y1), int(img_x2), int(img_y2)))
-            self.box_start = None
-            self.box_end = None
-            self.update()
-            return
+        if self.add_object_mode and self.drawing_box:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.drawing_box = False
+                if self.box_start is not None and self.box_end is not None and hasattr(self.box_start, 'isNull') and hasattr(self.box_end, 'isNull') and not self.box_start.isNull() and not self.box_end.isNull():
+                    x1 = min(self.box_start.x(), self.box_end.x())
+                    y1 = min(self.box_start.y(), self.box_end.y())
+                    x2 = max(self.box_start.x(), self.box_end.x())
+                    y2 = max(self.box_start.y(), self.box_end.y())
+                    # Convert widget coords to image coords
+                    img_x1, img_y1 = self.widget_to_image_coords(x1, y1)
+                    img_x2, img_y2 = self.widget_to_image_coords(x2, y2)
+                    self.manual_box_drawn.emit((int(img_x1), int(img_y1), int(img_x2), int(img_y2)))
+                self.box_start = None
+                self.box_end = None
+                self.update()
+                return
+            elif event.button() == Qt.MouseButton.RightButton:
+                # Cancel object drawing
+                self.drawing_box = False
+                self.box_start = None
+                self.box_end = None
+                self.update()
+                return
         if self.resizing:
             self.resizing = False
             self.resize_handle = None
@@ -522,10 +793,35 @@ class PDFViewer(QLabel):
         if self.dragging:
             self.dragging = False
             self.drag_offset = None
+            self.drag_start_bbox = None
             self.update()
             if self.selected_bbox_index is not None:
                 self.bbox_edit_finished.emit(self.selected_bbox_index)
             return
+        # End polyline point drag (for both left and right mouse buttons)
+        if self._polyline_point_drag_idx is not None:
+            if self.selected_section_index is not None and self.selected_polyline_index is not None:
+                s_idx = int(self.selected_section_index)
+                p_idx = int(self.selected_polyline_index)
+                section = self.sections[s_idx]
+                polyline = section.polylines[p_idx]
+                idx = self._polyline_point_drag_idx
+                # Convert widget pos to image coords
+                img_x, img_y = self.widget_to_image_coords(event.pos().x(), event.pos().y())
+                polyline.points[idx] = (img_x, img_y)
+                self._polyline_point_drag_idx = None
+                self.update()
+                return
+        
+        # End polyline drag (for both left and right mouse buttons)
+        if self._polyline_dragging:
+            if self.selected_section_index is not None and self.selected_polyline_index is not None:
+                self._polyline_dragging = False
+                self._polyline_drag_start_pos = None
+                self._polyline_drag_start_points = None
+                self.update()
+                return
+        
         if event.button() == Qt.MouseButton.MiddleButton:
             self.is_panning = False
             self.pan_start_pos = None
@@ -557,11 +853,12 @@ class PDFViewer(QLabel):
         """Clean up temporary files"""
         if self.pdf_document:
             self.pdf_document.close()
-        
+            self.pdf_document = None  # Prevent further access
+
         if self.temp_dir and os.path.exists(self.temp_dir):
-            import shutil
             shutil.rmtree(self.temp_dir)
-    
+            self.temp_dir = None
+
     def get_bbox_at_pos(self, pos: QPoint) -> Optional[int]:
         """Return index of detection whose bbox contains the given widget pos, or None"""
         if not self.detections or not self.scaled_pixmap:
@@ -575,6 +872,42 @@ class PDFViewer(QLabel):
         for idx, detection in enumerate(self.detections):
             x1, y1, x2, y2 = detection.bbox
             if x1 <= x <= x2 and y1 <= y <= y2:
+                return idx
+        return None
+
+    def get_polyline_point_at_pos(self, pos: QPoint) -> Optional[int]:
+        """Return index of polyline point at the given widget pos, or None"""
+        if not self.sections or not self.scaled_pixmap:
+            return None
+        
+        # Check if we have a selected polyline
+        if self.selected_section_index is None or self.selected_polyline_index is None:
+            return None
+            
+        s_idx = int(self.selected_section_index)
+        p_idx = int(self.selected_polyline_index)
+        section = self.sections[s_idx]
+        polyline = section.polylines[p_idx]
+        
+        if polyline.page != self.current_page + 1:
+            return None
+            
+        # Convert polyline points to widget coordinates
+        widget_points = []
+        if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
+            width = int(self.width())
+            height = int(self.height())
+            image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
+            for x, y in polyline.points:
+                widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
+                widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
+                widget_points.append(QPoint(widget_x, widget_y))
+        
+        # Check if mouse is over any point
+        handle_size = max(20, int(25 * self.zoom_factor))  # Larger hit area for consistency
+        for idx, pt in enumerate(widget_points):
+            dist = (pos - pt).manhattanLength()
+            if dist <= handle_size:
                 return idx
         return None    
 
@@ -599,6 +932,10 @@ class PDFViewer(QLabel):
     def set_add_object_mode(self, enabled: bool):
         self.add_object_mode = enabled
         if enabled:
+            # Exit section mode if it was active
+            self.add_section_mode = False
+            self.section_points = []
+            self.drawing_section = False
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -611,6 +948,11 @@ class PDFViewer(QLabel):
         """Enable/disable section drawing mode"""
         self.add_section_mode = enabled
         if enabled:
+            # Exit object mode if it was active
+            self.add_object_mode = False
+            self.drawing_box = False
+            self.box_start = None
+            self.box_end = None
             self.setCursor(Qt.CursorShape.CrossCursor)
             self.section_points = []
             self.drawing_section = False
@@ -664,6 +1006,21 @@ class PDFViewer(QLabel):
         return inside
 
     def keyPressEvent(self, event):
+        # Polyline clipboard shortcuts
+        if (self.selected_section_index is not None and self.selected_polyline_index is not None):
+            if event.key() == Qt.Key.Key_Delete:
+                self.delete_selected_polyline()
+                return
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                if event.key() == Qt.Key.Key_C:
+                    self.copy_selected_polyline()
+                    return
+                elif event.key() == Qt.Key.Key_X:
+                    self.cut_selected_polyline()
+                    return
+                elif event.key() == Qt.Key.Key_V:
+                    self.paste_polyline_to_section(self.selected_section_index)
+                    return
         if self.add_object_mode and event.key() == Qt.Key.Key_Escape:
             self.set_add_object_mode(False)
             main_window = self.get_main_window()
@@ -714,28 +1071,36 @@ class PDFViewer(QLabel):
 
     def _draw_sections(self, painter: QPainter):
         """Draw all sections on the viewer"""
-        if not self.sections or not self.scaled_pixmap:
+        if self.scaled_pixmap is None:
             return
-        for section in self.sections:
-            for polyline in getattr(section, 'polylines', []):
+        for s_idx, section in enumerate(self.sections):
+            for p_idx, polyline in enumerate(getattr(section, 'polylines', [])):
                 if polyline.page != self.current_page + 1:
                     continue
                 if not polyline.points or len(polyline.points) < 2:
                     continue
                 widget_points = []
-                for img_x, img_y in polyline.points:
-                    widget_x = img_x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-                    widget_y = img_y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
-                    widget_points.append(QPoint(int(widget_x), int(widget_y)))
+                if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
+                    width = int(self.width())
+                    height = int(self.height())
+                    image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
+                    for x, y in polyline.points:
+                        widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
+                        widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
+                        widget_points.append(QPoint(widget_x, widget_y))
                 if len(widget_points) < 2:
                     continue
-                # Make polyline twice as thick and 50% opacity
-                pen_width = max(12, int(16 * self.zoom_factor))
+                is_selected = (s_idx == self.selected_section_index and p_idx == self.selected_polyline_index)
+                pen_width = max(12, int(16 * self.zoom_factor)) if not is_selected else max(18, int(22 * self.zoom_factor))
                 if section.color:
                     color = QColor(section.color)
                 else:
                     color = QColor(Qt.GlobalColor.blue)
-                color.setAlpha(128)  # 50% opacity
+                if is_selected:
+                    color = QColor(Qt.GlobalColor.red)
+                    color.setAlpha(200)
+                else:
+                    color.setAlpha(128)  # 50% opacity
                 painter.setPen(QPen(color, pen_width, Qt.PenStyle.SolidLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawPolyline(QPolygon(widget_points))
@@ -752,13 +1117,31 @@ class PDFViewer(QLabel):
                 rect_y = label_point.y() - text_height - 6
                 rect_w = text_width + 2 * padding
                 rect_h = text_height + 2 * padding // 2
-                # Draw background
-                painter.setBrush(QBrush(Qt.GlobalColor.white))
+                painter.setBrush(QBrush(QColor(255, 255, 255, 200)))
                 painter.setPen(QPen(section.color if section.color else Qt.GlobalColor.blue, 3))
                 painter.drawRect(rect_x, rect_y, rect_w, rect_h)
-                # Draw text
                 painter.setPen(QPen(Qt.GlobalColor.black, 1))
                 painter.drawText(rect_x + padding, rect_y + text_height + padding // 4 - 2, label_text)
+                # Always show handles for selected polyline
+                if is_selected:
+                    # Draw larger, more visible handles
+                    painter.setBrush(QBrush(Qt.GlobalColor.yellow))  # More visible color
+                    painter.setPen(QPen(Qt.GlobalColor.black, max(3, int(4 * self.zoom_factor))))
+                    handle_size = max(10, int(14 * self.zoom_factor))  # Reasonable visual handles
+                    
+                    for i, pt in enumerate(widget_points):
+                        # Draw outer circle for better visibility
+                        painter.setBrush(QBrush(Qt.GlobalColor.red))
+                        painter.drawEllipse(pt, handle_size + 4, handle_size + 4)
+                        # Draw inner circle
+                        painter.setBrush(QBrush(Qt.GlobalColor.yellow))
+                        painter.drawEllipse(pt, handle_size, handle_size)
+                        
+                        # Add point index for debugging
+                        if getattr(self, 'debug_mode', False):
+                            painter.setPen(QPen(Qt.GlobalColor.black, 1))
+                            painter.drawText(pt.x() + handle_size//2, pt.y() - handle_size//2, str(i))
+                            painter.setPen(QPen(Qt.GlobalColor.black, max(3, int(4 * self.zoom_factor))))
 
     def _draw_section_preview(self, painter: QPainter):
         """Draw preview of section being drawn"""
@@ -788,18 +1171,18 @@ class PDFViewer(QLabel):
         # Helper to find the main window for exit_add_object_mode
         parent = self.parent()
         try:
-            from analyser import PIDRecognitionTool
+            from core.main_window import Spectra
         except ImportError:
-            PIDRecognitionTool = None
+            Spectra = None
         while parent is not None:
-            if PIDRecognitionTool is not None and isinstance(parent, PIDRecognitionTool):
+            if Spectra is not None and isinstance(parent, Spectra):
                 return parent
             parent = parent.parent() if hasattr(parent, 'parent') else None
         return None
 
     def display_with_offset(self):
         """Display pixmap with pan offset and draw manual box preview if needed"""
-        if not self.scaled_pixmap:
+        if self.scaled_pixmap is None:
             return
         # Create a pixmap the size of the widget
         display_pixmap = QPixmap(self.size())
@@ -869,4 +1252,109 @@ class PDFViewer(QLabel):
         if not self.add_object_mode:
             self.setCursor(Qt.CursorShape.ArrowCursor)
         super().leaveEvent(event)
+
+    def show_polyline_context_menu(self, section_idx, polyline_idx, global_pos):
+        menu = QMenu(self)
+        cut_action = menu.addAction("Cut Polyline")
+        copy_action = menu.addAction("Copy Polyline")
+        paste_action = menu.addAction("Paste Polyline")
+        delete_action = menu.addAction("Delete Polyline")
+        paste_action.setEnabled(self._polyline_clipboard is not None and self.selected_section_index is not None)
+        action = menu.exec(global_pos)
+        if action == cut_action:
+            self.cut_selected_polyline()
+        elif action == copy_action:
+            self.copy_selected_polyline()
+        elif action == paste_action:
+            self.paste_polyline_to_section(self.selected_section_index)
+        elif action == delete_action:
+            self.delete_selected_polyline()
+        self.update()
+
+    def cut_selected_polyline(self):
+        self.copy_selected_polyline()
+        self.delete_selected_polyline()
+
+    def copy_selected_polyline(self):
+        if self.selected_section_index is not None and self.selected_polyline_index is not None:
+            s_idx = int(self.selected_section_index)
+            p_idx = int(self.selected_polyline_index)
+            section = self.sections[s_idx]
+            polyline = section.polylines[p_idx]
+            
+            self._polyline_clipboard = _copy.deepcopy(polyline)
+
+    def paste_polyline_to_section(self, section_idx):
+        if self._polyline_clipboard is not None and section_idx is not None:
+            polyline = _copy.deepcopy(self._polyline_clipboard)
+            # Optionally, set to current page
+            polyline.page = self.current_page + 1
+            self.sections[section_idx].polylines.append(polyline)
+            self.selected_polyline_index = len(self.sections[section_idx].polylines) - 1
+            self.selected_section_index = section_idx
+            self.update()
+
+    def delete_selected_polyline(self):
+        if self.selected_section_index is not None and self.selected_polyline_index is not None:
+            s_idx = int(self.selected_section_index)
+            p_idx = int(self.selected_polyline_index)
+            section = self.sections[s_idx]
+            if 0 <= p_idx < len(section.polylines):
+                del section.polylines[p_idx]
+                # Adjust selection
+                if p_idx >= len(section.polylines):
+                    self.selected_polyline_index = len(section.polylines) - 1 if section.polylines else None
+                self.update()
+
+    def paste_polyline_at_pos(self, pos: QPoint):
+        """Paste polyline from clipboard at the given widget position, into the first section (or selected section if available)."""
+        if self._polyline_clipboard is not None and self.sections:
+            polyline = _copy.deepcopy(self._polyline_clipboard)
+            # Place first point at pos, keep shape
+            if polyline.points:
+                # Compute offset from first point to pos (in image coords)
+                img_x, img_y = self.widget_to_image_coords(pos.x(), pos.y())
+                orig_x, orig_y = polyline.points[0]
+                dx = img_x - orig_x
+                dy = img_y - orig_y
+                polyline.points = [(x + dx, y + dy) for (x, y) in polyline.points]
+                polyline.page = self.current_page + 1
+                # Paste into selected section if any, else first section
+                section_idx = self.selected_section_index if self.selected_section_index is not None else 0
+                self.sections[section_idx].polylines.append(polyline)
+                self.selected_section_index = section_idx
+                self.selected_polyline_index = len(self.sections[section_idx].polylines) - 1
+                self.update()
+
+    def show_polyline_point_context_menu(self, point_idx, global_pos):
+        menu = QMenu(self)
+        delete_action = menu.addAction("Delete Point")
+        action = menu.exec(global_pos)
+        if action == delete_action:
+            s_idx = int(self.selected_section_index)
+            p_idx = int(self.selected_polyline_index)
+            section = self.sections[s_idx]
+            polyline = section.polylines[p_idx]
+            if len(polyline.points) > 2:
+                del polyline.points[point_idx]
+                self.update()
+
+    def show_polyline_add_point_context_menu(self, insert_idx, pos_xy, global_pos):
+        menu = QMenu(self)
+        add_action = menu.addAction("Add Point")
+        action = menu.exec(global_pos)
+        if action == add_action:
+            s_idx = int(self.selected_section_index)
+            p_idx = int(self.selected_polyline_index)
+            section = self.sections[s_idx]
+            polyline = section.polylines[p_idx]
+            polyline.points.insert(insert_idx, (pos_xy[0] / self.zoom_factor - (self.width() - self.scaled_pixmap.width()) // 2 / self.zoom_factor - self.image_offset[0] / self.zoom_factor,
+                                                pos_xy[1] / self.zoom_factor - (self.height() - self.scaled_pixmap.height()) // 2 / self.zoom_factor - self.image_offset[1] / self.zoom_factor))
+            self.update()
+
+    def toggle_debug_mode(self):
+        """Toggle debug mode to show hit areas"""
+        self.debug_mode = not getattr(self, 'debug_mode', False)
+        self.update()
+        print(f"Debug mode: {'ON' if self.debug_mode else 'OFF'}")
                 

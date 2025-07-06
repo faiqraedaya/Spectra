@@ -7,7 +7,7 @@
 
 <p align="center">
    <i>
-      Smart Parts Evaluation &amp; Counting Tool for Risk Assessment
+      Smart Parts Evaluation &amp; Counting Tool for Risk Assessments
    </i>
 </p>
 
@@ -45,7 +45,7 @@ Designed to automate the "Parts Count" methodology for frequency analysis in Qua
 
 2. Install dependencies:
    ```bash
-   pip install PySide6 roboflow pillow pymupdf
+   pip install -r requirements.txt
    ```
 
 3. Set up Roboflow API key:
@@ -59,13 +59,13 @@ Designed to automate the "Parts Count" methodology for frequency analysis in Qua
    ```bash:
    export ROBOFLOW_API_KEY=your_api_key_here
    ```
+
 ## Usage 
 
-1. Launch the app from the project root using the shortcut:
+1. Launch the application:
    ```bash
    python run_spectra.py
    ```
-   This ensures all imports work correctly.
 
    Or, to run directly as a module:
    ```bash
