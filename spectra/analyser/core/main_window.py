@@ -3,10 +3,12 @@ import os
 import re
 from typing import List
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
+    QFileDialog,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from config.settings import (
     APP_TITLE,
+    APP_VERSION,
     DEFAULT_CONFIDENCE,
     DEFAULT_OVERLAP,
     DEFAULT_WINDOW_HEIGHT,
@@ -29,7 +32,13 @@ from core.analysis_manager import AnalysisManager
 from core.detection_manager import DetectionManager
 from core.project_manager import ProjectManager
 from detection.types import Detection
-from sections.sections import Section, import_sections_csv
+from sections.sections import (
+    Section,
+    add_section_with_points,
+    import_sections_csv,
+    show_section_context_menu,
+    update_sections_table,
+)
 from ui.menus import MenuManager
 from ui.panels.objects_panel import ObjectsPanel
 from ui.panels.results_panel import ResultsPanel
@@ -45,7 +54,7 @@ class Spectra(QMainWindow):
         self.project_name = "New Project"  # Track current project name
         self.setWindowTitle(f"{APP_TITLE} - {self.project_name}")
         self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
-        self.version = "1.1.0"
+        self.version = APP_VERSION
 
         # Initialize variables
         if os.getenv(ROBOFLOW_API_KEY_ENV):
@@ -201,12 +210,10 @@ class Spectra(QMainWindow):
 
     def on_section_drawn(self, points):
         """Handle when a new section is drawn"""
-        from sections.sections import add_section_with_points
         add_section_with_points(self, points)
 
     def on_section_right_clicked(self, section_index: int, global_pos=None):
         """Handle right-click on a section"""
-        from sections.sections import show_section_context_menu
         show_section_context_menu(self, section_index, global_pos=global_pos)
 
     # Project management methods (delegated to project manager)
@@ -266,7 +273,6 @@ class Spectra(QMainWindow):
             self.detection_manager.paste_detection(idx)
         else:
             # Paste at center of viewer
-            from PySide6.QtCore import QPoint
             w = self.viewer_panel.pdf_viewer.width() // 2
             h = self.viewer_panel.pdf_viewer.height() // 2
             self.detection_manager.paste_detection(None, QPoint(w, h))
@@ -301,7 +307,6 @@ class Spectra(QMainWindow):
         self.objects_panel.update_objects_table()
 
     def update_sections_table(self):
-        from sections.sections import update_sections_table
         update_sections_table(self)
 
     def update_section_filter_dropdown(self):
@@ -367,17 +372,15 @@ class Spectra(QMainWindow):
 
     # About/Help methods
     def show_about(self):
-        from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(
             self,
             "About",
             "Spectra\n"
-            f"Version {self.version}\n"
+            f"Version {APP_VERSION}\n"
             "© Faiq Raedaya 2025",
         )
 
     def show_help(self):
-        from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(
             self,
             "Help",
@@ -414,7 +417,6 @@ class Spectra(QMainWindow):
 
     def export_results_to_csv(self):
         """Export the results table to a CSV file."""
-        from PySide6.QtWidgets import QFileDialog
         if not self.results_panel.results_table:
             return
         file_path, _ = QFileDialog.getSaveFileName(

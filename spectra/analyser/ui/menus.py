@@ -102,14 +102,14 @@ class MenuManager:
 
     def _create_sections_menu(self, sections_menu):
         """Create Sections menu items"""
-        draw_section_action = QAction("Enter Draw Section Mode", self.main_window)
+        draw_section_action = QAction("Draw Section", self.main_window)
         draw_section_action.setShortcut("Ctrl+Shift+Space")
         draw_section_action.triggered.connect(self.main_window.enter_add_section_mode)
         sections_menu.addAction(draw_section_action)
 
     def _create_objects_menu(self, objects_menu):
         """Create Objects menu items"""
-        add_object_action = QAction("Enter Add Object Mode", self.main_window)
+        add_object_action = QAction("Add Object", self.main_window)
         add_object_action.setShortcut("Ctrl+Space")
         add_object_action.triggered.connect(self.main_window.enter_add_object_mode)
         objects_menu.addAction(add_object_action)
