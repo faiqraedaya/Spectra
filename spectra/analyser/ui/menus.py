@@ -107,18 +107,18 @@ class MenuManager:
         draw_section_action.triggered.connect(self.main_window.enter_add_section_mode)
         sections_menu.addAction(draw_section_action)
 
+        sections_menu.addSeparator()
+
+        import_csv_action = QAction("Import CSV", self.main_window)
+        import_csv_action.triggered.connect(self.main_window.import_sections_csv)
+        sections_menu.addAction(import_csv_action)
+
     def _create_objects_menu(self, objects_menu):
         """Create Objects menu items"""
         add_object_action = QAction("Add Object", self.main_window)
         add_object_action.setShortcut("Ctrl+Space")
         add_object_action.triggered.connect(self.main_window.enter_add_object_mode)
         objects_menu.addAction(add_object_action)
-
-        objects_menu.addSeparator()
-
-        import_csv_action = QAction("Import CSV", self.main_window)
-        import_csv_action.triggered.connect(self.main_window.import_sections_csv)
-        objects_menu.addAction(import_csv_action)
 
     def _create_analysis_menu(self, analysis_menu):
         """Create Analysis menu items"""

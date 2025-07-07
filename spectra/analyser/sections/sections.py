@@ -1,9 +1,11 @@
 import colorsys
 import copy
 import math
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Set
+from collections import defaultdict
+import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
@@ -40,6 +42,8 @@ class Section:
             self.color = get_next_rainbow_color(color_index)
         else:
             self.color = get_next_rainbow_color(0)
+        self._bbox_cache = None  # Cache for bounding box
+        self._last_polyline_count = 0  # Track changes for cache invalidation
     
     def __str__(self):
         return self.name
@@ -65,6 +69,39 @@ class Section:
             color=color
         )
 
+    def get_bounding_box(self) -> Optional[Tuple[float, float, float, float]]:
+        """Get the bounding box of all polylines in this section"""
+        if not self.polylines:
+            return None
+            
+        # Check if cache is valid
+        if self._bbox_cache is not None and self._last_polyline_count == len(self.polylines):
+            return self._bbox_cache
+            
+        # Calculate bounding box
+        min_x = min_y = float('inf')
+        max_x = max_y = float('-inf')
+        
+        for polyline in self.polylines:
+            for point in polyline.points:
+                min_x = min(min_x, point[0])
+                min_y = min(min_y, point[1])
+                max_x = max(max_x, point[0])
+                max_y = max(max_y, point[1])
+        
+        if min_x == float('inf'):
+            self._bbox_cache = None
+        else:
+            self._bbox_cache = (min_x, min_y, max_x, max_y)
+        
+        self._last_polyline_count = len(self.polylines)
+        return self._bbox_cache
+    
+    def invalidate_cache(self):
+        """Invalidate the bounding box cache"""
+        self._bbox_cache = None
+        self._last_polyline_count = 0
+
 def move_section_up(self):
     """Move the selected section up in the list"""
     if not self.sections_panel.sections_table:
@@ -72,9 +109,16 @@ def move_section_up(self):
     selected = self.sections_panel.sections_table.currentRow()
     if selected > 0:
         self.sections_list[selected-1], self.sections_list[selected] = self.sections_list[selected], self.sections_list[selected-1]
-        update_sections_table(self)
+        # Use debounced update
+        if hasattr(self, 'update_sections_table'):
+            self.update_sections_table()
+        else:
+            update_sections_table(self)
         self.sections_panel.sections_table.selectRow(selected-1)
-        update_section_filter_dropdown(self)
+        if hasattr(self, 'update_section_filter_dropdown'):
+            self.update_section_filter_dropdown()
+        else:
+            update_section_filter_dropdown(self)
 
 def move_section_down(self):
     """Move the selected section down in the list"""
@@ -83,9 +127,16 @@ def move_section_down(self):
     selected = self.sections_panel.sections_table.currentRow()
     if 0 <= selected < len(self.sections_list)-1:
         self.sections_list[selected+1], self.sections_list[selected] = self.sections_list[selected], self.sections_list[selected+1]
-        update_sections_table(self)
+        # Use debounced update
+        if hasattr(self, 'update_sections_table'):
+            self.update_sections_table()
+        else:
+            update_sections_table(self)
         self.sections_panel.sections_table.selectRow(selected+1)
-        update_section_filter_dropdown(self)
+        if hasattr(self, 'update_section_filter_dropdown'):
+            self.update_section_filter_dropdown()
+        else:
+            update_section_filter_dropdown(self)
 
 def import_sections_csv(self):
     """Import sections from a CSV file"""
@@ -119,13 +170,21 @@ def import_sections_csv(self):
                         self.sections_list.append(new_section)
                         existing_names.add(section_name)
             
-            update_sections_table(self)
-            update_section_filter_dropdown(self)
+            # Use debounced updates
+            if hasattr(self, 'update_sections_table'):
+                self.update_sections_table()
+            else:
+                update_sections_table(self)
+            if hasattr(self, 'update_section_filter_dropdown'):
+                self.update_section_filter_dropdown()
+            else:
+                update_section_filter_dropdown(self)
             
         except Exception as e:
             QMessageBox.warning(self, "Import Error", f"Failed to import CSV file: {str(e)}")
 
 def update_sections_table(self):
+    """Update the sections table - this function now uses debouncing through the main window"""
     if not self.sections_panel.sections_table:
         return
     self.sections_panel.sections_table.blockSignals(True)
@@ -169,7 +228,10 @@ def handle_section_edit(self, item):
     if col == 0:  # Section name
         if not text:
             # Prevent empty names
-            update_sections_table(self)
+            if hasattr(self, 'update_sections_table'):
+                self.update_sections_table()
+            else:
+                update_sections_table(self)
             return
         section.name = text
     elif col == 1:  # Line size
@@ -185,7 +247,10 @@ def handle_section_edit(self, item):
                         QMessageBox.StandardButton.No
                     )
                     if reply != QMessageBox.StandardButton.Yes:
-                        update_sections_table(self)
+                        if hasattr(self, 'update_sections_table'):
+                            self.update_sections_table()
+                        else:
+                            update_sections_table(self)
                         return
                 section.line_size = value
             except ValueError:
@@ -195,13 +260,20 @@ def handle_section_edit(self, item):
                     "Invalid Input",
                     "Please enter a valid number for line size."
                 )
-                update_sections_table(self)
+                if hasattr(self, 'update_sections_table'):
+                    self.update_sections_table()
+                else:
+                    update_sections_table(self)
                 return
         else:
             section.line_size = None
     
     # Update the table to reflect the calculated values
-    update_sections_table(self)
+    if hasattr(self, 'update_sections_table'):
+        self.update_sections_table()
+    else:
+        update_sections_table(self)
+    invalidate_section_assignment_cache(self)
     assign_objects_to_sections(self)
 
 def update_section_filter_dropdown(self):
@@ -235,8 +307,15 @@ def add_section_with_points(self, points):
             for poly in polylines:
                 poly.page = getattr(self, 'current_page', 1)
                 section.polylines.append(poly)
-            update_sections_table(self)
-            update_section_filter_dropdown(self)
+            # Use debounced updates
+            if hasattr(self, 'update_sections_table'):
+                self.update_sections_table()
+            else:
+                update_sections_table(self)
+            if hasattr(self, 'update_section_filter_dropdown'):
+                self.update_section_filter_dropdown()
+            else:
+                update_section_filter_dropdown(self)
             if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
                 self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
             if self.sections_panel.sections_table:
@@ -248,12 +327,20 @@ def add_section_with_points(self, points):
     color = dialog.get_color()
     new_section = Section(name, line_size=line_size, polylines=polylines, color=color)
     self.sections_list.append(new_section)
-    update_sections_table(self)
-    update_section_filter_dropdown(self)
+    # Use debounced updates
+    if hasattr(self, 'update_sections_table'):
+        self.update_sections_table()
+    else:
+        update_sections_table(self)
+    if hasattr(self, 'update_section_filter_dropdown'):
+        self.update_section_filter_dropdown()
+    else:
+        update_section_filter_dropdown(self)
     if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
         self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
     if self.sections_panel.sections_table:
         self.sections_panel.sections_table.selectRow(len(self.sections_list) - 1)
+    invalidate_section_assignment_cache(self)
     assign_objects_to_sections(self)
 
 def show_section_context_menu(self, section_index: int, global_pos=None):
@@ -324,10 +411,19 @@ def edit_section_points(self, section_index: int):
     section.line_size = dialog.get_line_size()
     section.color = dialog.get_color()
     section.polylines = dialog.get_polylines()
-    update_sections_table(self)
-    update_section_filter_dropdown(self)
+    section.invalidate_cache()  # Invalidate bounding box cache
+    # Use debounced updates
+    if hasattr(self, 'update_sections_table'):
+        self.update_sections_table()
+    else:
+        update_sections_table(self)
+    if hasattr(self, 'update_section_filter_dropdown'):
+        self.update_section_filter_dropdown()
+    else:
+        update_section_filter_dropdown(self)
     if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
         self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
+    invalidate_section_assignment_cache(self)
     assign_objects_to_sections(self)
 
 def cut_section(self, section_index: int):
@@ -363,9 +459,17 @@ def paste_section(self):
     color_index = len(self.sections_list)
     copied_section.name = new_name
     copied_section.color = get_next_rainbow_color(color_index)
+    copied_section.invalidate_cache()  # Ensure cache is invalidated for new section
     self.sections_list.append(copied_section)
-    update_sections_table(self)
-    update_section_filter_dropdown(self)
+    # Use debounced updates
+    if hasattr(self, 'update_sections_table'):
+        self.update_sections_table()
+    else:
+        update_sections_table(self)
+    if hasattr(self, 'update_section_filter_dropdown'):
+        self.update_section_filter_dropdown()
+    else:
+        update_section_filter_dropdown(self)
     
     # Update the PDF viewer
     if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
@@ -386,7 +490,11 @@ def change_section_color(self, section_index: int):
     
     if new_color.isValid():
         section.color = new_color
-        update_sections_table(self)
+        # Use debounced update
+        if hasattr(self, 'update_sections_table'):
+            self.update_sections_table()
+        else:
+            update_sections_table(self)
         
         # Update the PDF viewer
         if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
@@ -410,33 +518,115 @@ def delete_section_from_context(self, section_index: int):
     
     if reply == QMessageBox.StandardButton.Yes:
         del self.sections_list[section_index]
-        update_sections_table(self)
-        update_section_filter_dropdown(self)
+        # Use debounced updates
+        if hasattr(self, 'update_sections_table'):
+            self.update_sections_table()
+        else:
+            update_sections_table(self)
+        if hasattr(self, 'update_section_filter_dropdown'):
+            self.update_section_filter_dropdown()
+        else:
+            update_section_filter_dropdown(self)
         
         # Update the PDF viewer
         if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
 
-def get_section_for_bbox(bbox, sections_list):
-    """Return the name of the most recently added section whose any polyline crosses the bbox, or 'Unassigned'."""
+def get_section_for_bbox_optimized(bbox, sections_list, section_bbox_cache: Optional[Dict[str, Optional[Tuple[float, float, float, float]]]] = None):
+    """Optimized version that uses bounding box checks before expensive intersection tests."""
+    x1, y1, x2, y2 = bbox
+    
+    # Use provided cache or calculate on demand
+    if section_bbox_cache is None:
+        section_bbox_cache = {section.name: section.get_bounding_box() for section in sections_list}
+    
+    # Check sections in reverse order (most recently added first)
     for section in reversed(sections_list):
-        for polyline in getattr(section, 'polylines', []):
-            if polyline_intersects_bbox(polyline.points, bbox):
-                return section.name
+        section_bbox = section_bbox_cache.get(section.name)
+        
+        # Quick bounding box check first
+        if section_bbox is not None:
+            sx1, sy1, sx2, sy2 = section_bbox
+            # Check if bounding boxes overlap
+            if not (x2 < sx1 or x1 > sx2 or y2 < sy1 or y1 > sy2):
+                # Bounding boxes overlap, do detailed intersection test
+                for polyline in getattr(section, 'polylines', []):
+                    if polyline_intersects_bbox(polyline.points, bbox):
+                        return section.name
+        else:
+            # No bounding box (empty section), do detailed test
+            for polyline in getattr(section, 'polylines', []):
+                if polyline_intersects_bbox(polyline.points, bbox):
+                    return section.name
+    
     return "Unassigned"
 
+def get_section_for_bbox(bbox, sections_list):
+    """Return the name of the most recently added section whose any polyline crosses the bbox, or 'Unassigned'."""
+    return get_section_for_bbox_optimized(bbox, sections_list)
+
 def assign_objects_to_sections(self):
-    """Assign each detection to the most recently added section whose polyline crosses its bbox, and set its color property."""
+    """Optimized version that uses caching and spatial indexing to reduce complexity."""
     if not hasattr(self, 'detections') or not hasattr(self, 'sections_list'):
         return
+    
+    # Initialize cache if not exists
+    if not hasattr(self, '_section_assignment_cache'):
+        self._section_assignment_cache = {}
+        self._last_sections_hash = None
+        self._last_detections_hash = None
+    
+    # Calculate hash of current state for cache validation
+    sections_hash = hash(tuple((s.name, len(s.polylines)) for s in self.sections_list))
+    detections_hash = hash(tuple((d.bbox, getattr(d, 'page_num', 0)) for d in self.detections))
+    
+    # Check if cache is still valid
+    if (self._last_sections_hash == sections_hash and 
+        self._last_detections_hash == detections_hash and 
+        self._section_assignment_cache):
+        # Cache is valid, apply cached assignments
+        for det in self.detections:
+            cache_key = (det.bbox, getattr(det, 'page_num', 0))
+            if cache_key in self._section_assignment_cache:
+                section_name, color = self._section_assignment_cache[cache_key]
+                det.section = section_name
+                det.color = color
+        return
+    
+    # Cache is invalid, recalculate everything
+    self._section_assignment_cache.clear()
+    
+    # Pre-calculate section bounding boxes
+    section_bbox_cache = {}
+    for section in self.sections_list:
+        section_bbox_cache[section.name] = section.get_bounding_box()
+    
+    # Create section name to color mapping
+    section_colors = {section.name: section.color for section in self.sections_list}
+    
+    # Process all detections
     for det in self.detections:
-        det.section = get_section_for_bbox(det.bbox, self.sections_list)
-        # Set color property
-        det.color = None
-        for section in self.sections_list:
-            if section.name == det.section:
-                det.color = section.color
-                break
+        # Get section assignment
+        section_name = get_section_for_bbox_optimized(det.bbox, self.sections_list, section_bbox_cache)
+        det.section = section_name
+        
+        # Set color
+        det.color = section_colors.get(section_name)
+        
+        # Cache the result
+        cache_key = (det.bbox, getattr(det, 'page_num', 0))
+        self._section_assignment_cache[cache_key] = (section_name, det.color)
+    
+    # Update cache state
+    self._last_sections_hash = sections_hash
+    self._last_detections_hash = detections_hash
+
+def invalidate_section_assignment_cache(self):
+    """Invalidate the section assignment cache when sections change."""
+    if hasattr(self, '_section_assignment_cache'):
+        self._section_assignment_cache.clear()
+        self._last_sections_hash = None
+        self._last_detections_hash = None
 
 def polyline_intersects_bbox(points, bbox):
     """Return True if any segment of the polyline intersects the bbox."""
