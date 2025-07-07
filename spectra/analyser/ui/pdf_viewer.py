@@ -6,7 +6,7 @@ import tempfile
 from typing import List, Optional, Tuple, cast
 
 from PIL import Image
-from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, Qt, Signal, QThread, QTimer
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -43,39 +43,44 @@ class PDFViewer(QLabel):
         self.current_page = 0
         self.total_pages = 0
         self.temp_dir = None
-
+        
+        # Page caching to prevent unnecessary re-rendering
+        self._page_cache = {}  # page_num -> (pixmap, temp_path)
+        self._page_cache_rendered = set()  # Set of page numbers that have been rendered
+        
         # Display properties
         self.zoom_factor = 1.0
         self.min_zoom = 0.1
-        self.max_zoom = 5.0
-        self.zoom_step = 0.1
-
-        # Pan properties
-        self.pan_start_pos = None
+        self.max_zoom = 10.0
+        self.zoom_step = 0.2
         self.image_offset = [0, 0]
-        self.is_panning = False
-
-        # Current display
+        
+        # Pixmaps
         self.original_pixmap = None
         self.scaled_pixmap = None
+        
+        # Detection data
         self.detections = []
-
-        # Enable mouse tracking for pan
-        self.setMouseTracking(True)
-
-        # Add Object (manual) mode
+        
+        # Section data
+        self.sections = []
+        self.section_points = []
+        
+        # Pan properties
+        self.pan_start_pos = None
+        self.is_panning = False
+        
+        # Drawing modes
         self.add_object_mode = False
         self.drawing_box = False
         self.box_start = None
         self.box_end = None
-
+        
         # Section drawing mode
         self.add_section_mode = False
         self.drawing_section = False
-        self.section_points = []  # List of (x, y) points for current section being drawn
-        self.sections = []  # List of Section objects to display
-
-        # Drag/resize bbox
+        
+        # Drag/resize bbox state
         self.selected_bbox_index = None
         self.dragging = False
         self.resizing = False
@@ -83,24 +88,45 @@ class PDFViewer(QLabel):
         self.drag_offset = None
         self.resize_start_bbox = None
         self.resize_start_pos = None
-        self.handle_size = 8  # Make handles larger for easier grabbing
+        self.handle_size = 8
         
         # Polyline selection state
-        self.selected_section_index = None  # Index of selected section
-        self.selected_polyline_index = None  # Index of selected polyline within section
-        self._polyline_clipboard = None  # For cut/copy/paste
+        self.selected_section_index = None
+        self.selected_polyline_index = None
+        self._polyline_clipboard = None
         self._polyline_dragging = False
         self._polyline_drag_start_pos = None
         self._polyline_drag_start_points = None
         self._polyline_point_drag_idx = None
         self.debug_mode = True  # Set to True to show detection areas
 
+        # Display update batching
+        self._display_update_pending = False
+        self._display_update_timer = QTimer()
+        self._display_update_timer.setSingleShot(True)
+        self._display_update_timer.timeout.connect(self._perform_display_update)
+        
+        # Enable mouse tracking for pan
+        self.setMouseTracking(True)
+
+    def __del__(self):
+        """Destructor to ensure cleanup is called when object is destroyed"""
+        try:
+            self.cleanup()
+        except:
+            # Ignore errors during destruction
+            pass
+
     def load_pdf(self, pdf_path: str) -> bool:
         """Load PDF and convert pages to images"""
         try:
-            # Clean up previous temp directory
+            # Clean up previous temp directory and cache
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
+            
+            # Clear page cache
+            self._page_cache.clear()
+            self._page_cache_rendered.clear()
 
             # Create new temp directory
             self.temp_dir = tempfile.mkdtemp()
@@ -118,32 +144,58 @@ class PDFViewer(QLabel):
             return False
     
     def render_current_page(self):
-        """Render current PDF page to image"""
+        """Render current PDF page to image with caching"""
         if not self.pdf_document or self.current_page >= self.total_pages:
             return
         if self.temp_dir is None:
             return
+            
+        # Check if page is already cached
+        if self.current_page in self._page_cache:
+            pixmap, temp_path = self._page_cache[self.current_page]
+            self.original_pixmap = pixmap
+            self.update_display()
+            return
+            
+        # Render page using helper method
+        result = self._render_page_to_cache(self.current_page)
+        if result:
+            pixmap, temp_path = result
+            self.original_pixmap = pixmap
+            self.update_display()
+    
+    def _render_page_to_cache(self, page_num: int) -> Optional[Tuple[QPixmap, str]]:
+        """Render a specific page and cache it. Returns (pixmap, temp_path) or None on error."""
+        if not self.pdf_document or page_num >= self.total_pages or self.temp_dir is None:
+            return None
+            
         try:
             # Get page
-            page = self.pdf_document[self.current_page]
+            page = self.pdf_document[page_num]
             
             # Render at high DPI for quality
             mat = fitz.Matrix(2.0, 2.0)  # 2x scaling for better quality
-            pix = page.get_pixmap(matrix=mat)
+            pix = page.get_pixmap(matrix=mat)  # type: ignore[attr-defined]
             
             # Convert to PIL Image then to QPixmap
             img_data = pix.tobytes("ppm")
             pil_image = Image.open(io.BytesIO(img_data))
             
             # Convert PIL to QPixmap
-            temp_path = os.path.join(self.temp_dir, f"temp_page_{self.current_page}.png")
+            temp_path = os.path.join(self.temp_dir, f"page_{page_num}.png")
             pil_image.save(temp_path)
             
-            self.original_pixmap = QPixmap(temp_path)
-            self.update_display()
+            pixmap = QPixmap(temp_path)
+            
+            # Cache the rendered page
+            self._page_cache[page_num] = (pixmap, temp_path)
+            self._page_cache_rendered.add(page_num)
+            
+            return pixmap, temp_path
             
         except Exception as e:
-            QMessageBox.critical(None, "Error Rendering Page", f"Error rendering page: {e}")
+            QMessageBox.critical(None, "Error Rendering Page", f"Error rendering page {page_num}: {e}")
+            return None
         
     def set_page(self, page_num: int):
         """Set current page (0-indexed)"""
@@ -151,6 +203,8 @@ class PDFViewer(QLabel):
             self.current_page = page_num
             self.image_offset = [0, 0]
             self.render_current_page()
+            # Force immediate update for page changes
+            self.force_display_update()
         
     def zoom_in(self):
         """Zoom in"""
@@ -173,32 +227,56 @@ class PDFViewer(QLabel):
         self.update_display()
         self.zoom_changed.emit(self.zoom_factor)
 
-    def update_display(self):
-        """Update the display with current zoom and pan"""
+    def _perform_display_update(self):
+        """Internal method to perform the actual display update"""
+        self._display_update_pending = False
         if not self.original_pixmap:
             return
-        # Apply zoom
+        
+        # Apply zoom - create scaled pixmap only if needed
         zoomed_size = self.original_pixmap.size() * self.zoom_factor
-        # Always work on a copy for drawing
-        base_pixmap = self.original_pixmap.scaled(
-            zoomed_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-        )
-        self.scaled_pixmap = QPixmap(base_pixmap)
+        
+        # Reuse existing scaled pixmap if size matches, otherwise create new one
+        if (self.scaled_pixmap is None or 
+            self.scaled_pixmap.size() != zoomed_size):
+            self.scaled_pixmap = self.original_pixmap.scaled(
+                zoomed_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            )
+        
+        # Create a working copy for drawing detections (don't modify the cached scaled pixmap)
+        working_pixmap = QPixmap(self.scaled_pixmap)
+        
         # Draw detections if any
         if self.detections:
-            self.draw_detections()
-        self.display_with_offset()
+            self.draw_detections(working_pixmap)
+        
+        # Display the working pixmap with offset
+        self.display_with_offset(working_pixmap)
+        
         # Ensure cursor is correct after display update
         if self.add_object_mode:
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
 
-    def draw_detections(self):
-        """Draw detection bounding boxes on the scaled pixmap, with selection/handles"""
-        if not self.scaled_pixmap or not self.detections:
+    def update_display(self):
+        """Update the display with current zoom and pan - batched to prevent excessive redraws"""
+        if not self._display_update_pending:
+            self._display_update_pending = True
+            self._display_update_timer.start(16)  # ~60 FPS, batches rapid calls
+    
+    def force_display_update(self):
+        """Force immediate display update - use sparingly for operations that can't be batched"""
+        if self._display_update_pending:
+            self._display_update_timer.stop()
+            self._display_update_pending = False
+        self._perform_display_update()
+
+    def draw_detections(self, target_pixmap: QPixmap):
+        """Draw detection bounding boxes on the target pixmap, with selection/handles"""
+        if not target_pixmap or not self.detections:
             return
-        painter = QPainter(self.scaled_pixmap)
+        painter = QPainter(target_pixmap)
         painter.setFont(QFont("Arial", max(8, int(10 * self.zoom_factor))))
         scale_factor = self.zoom_factor
         for idx, detection in enumerate(self.detections):
@@ -228,6 +306,16 @@ class PDFViewer(QLabel):
 
     def set_detections(self, detections):
         """Set detections for current page. Detections must have 1-indexed page_num matching the PDF page."""
+        # Ensure this method is thread-safe
+        if QThread.currentThread() != self.thread():
+            # If called from a different thread, schedule the update on the main thread
+            QTimer.singleShot(0, lambda: self._set_detections_safe(detections))
+        else:
+            # Already on main thread, update directly
+            self._set_detections_safe(detections)
+    
+    def _set_detections_safe(self, detections):
+        """Thread-safe internal method to set detections"""
         self.detections = [d for d in detections if d.page_num == self.current_page + 1]
         self.update_display()
 
@@ -338,9 +426,12 @@ class PDFViewer(QLabel):
                 scale = self.zoom_factor
                 x1, y1, x2, y2 = [int(c * scale) for c in bbox]
                 # Adjust mouse pos for pan/centering offset
-                x_offset = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-                y_offset = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
-                adj_pos = QPoint(event.pos().x() - x_offset, event.pos().y() - y_offset)
+                if self.scaled_pixmap is not None:
+                    x_offset = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
+                    y_offset = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
+                    adj_pos = QPoint(event.pos().x() - x_offset, event.pos().y() - y_offset)
+                else:
+                    adj_pos = event.pos()
                 handle = self.handle_at_pos(adj_pos, (x1, y1, x2, y2))
                 
                 if handle:
@@ -387,15 +478,7 @@ class PDFViewer(QLabel):
                     if not polyline.points or len(polyline.points) < 2:
                         continue
                     
-                    widget_points = []
-                    if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
-                        width = int(self.width())
-                        height = int(self.height())
-                        image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
-                        for x, y in polyline.points:
-                            widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
-                            widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
-                            widget_points.append(QPoint(widget_x, widget_y))
+                    widget_points = self.convert_polyline_points_to_widget(polyline.points)
                     
                     # Check for point hits FIRST (higher priority)
                     handle_size = max(20, int(25 * self.zoom_factor))  # Larger hit area
@@ -419,15 +502,7 @@ class PDFViewer(QLabel):
                         if not polyline.points or len(polyline.points) < 2:
                             continue
                         
-                        widget_points = []
-                        if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
-                            width = int(self.width())
-                            height = int(self.height())
-                            image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
-                            for x, y in polyline.points:
-                                widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
-                                widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
-                                widget_points.append(QPoint(widget_x, widget_y))
+                        widget_points = self.convert_polyline_points_to_widget(polyline.points)
                         
                         # Check for segment hits
                         for i in range(len(widget_points) - 1):
@@ -494,15 +569,7 @@ class PDFViewer(QLabel):
                 p_idx = int(self.selected_polyline_index)
                 section = self.sections[s_idx]
                 polyline = section.polylines[p_idx]
-                widget_points = []
-                if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
-                    width = int(self.width())
-                    height = int(self.height())
-                    image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
-                    for x, y in polyline.points:
-                        widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
-                        widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
-                        widget_points.append(QPoint(widget_x, widget_y))
+                widget_points = self.convert_polyline_points_to_widget(polyline.points)
                 # Check for handle hit
                 for idx, pt in enumerate(widget_points):
                     handle_size = max(20, int(25 * self.zoom_factor))
@@ -605,9 +672,11 @@ class PDFViewer(QLabel):
             bbox[1] = max(0, min(bbox[1], bbox[3]-min_size))
             bbox[2] = max(bbox[0]+min_size, bbox[2])
             bbox[3] = max(bbox[1]+min_size, bbox[3])
-            self.detections[idx].bbox = cast(Tuple[int, int, int, int], tuple(int(round(v)) for v in bbox[:4]))
+            
+            # Use safe bbox validation and casting
+            self.detections[idx].bbox = self._validate_and_cast_bbox(bbox, min_size)
+            # Only update display, bbox_changed signal will be emitted on mouse release
             self.update_display()
-            self.bbox_changed.emit(idx, self.detections[idx].bbox)
             # Set resize cursor
             handle_cursor_map = {
                 'tl': Qt.CursorShape.SizeFDiagCursor,
@@ -648,9 +717,10 @@ class PDFViewer(QLabel):
             bbox[2] = max(bbox[0]+1, bbox[2])
             bbox[3] = max(bbox[1]+1, bbox[3])
             
-            self.detections[idx].bbox = cast(Tuple[int, int, int, int], tuple(int(round(v)) for v in bbox[:4]))
+            # Use safe bbox validation and casting
+            self.detections[idx].bbox = self._validate_and_cast_bbox(bbox, 1)
+            # Only update display, bbox_changed signal will be emitted on mouse release
             self.update_display()
-            self.bbox_changed.emit(idx, self.detections[idx].bbox)
             self.setCursor(Qt.CursorShape.SizeAllCursor)
             return
         # Polyline drag
@@ -666,10 +736,13 @@ class PDFViewer(QLabel):
                 dy = event.pos().y() - self._polyline_drag_start_pos.y()
                 new_points = []
                 for (x, y) in self._polyline_drag_start_points:
-                    img_x, img_y = self.widget_to_image_coords(
-                        int(x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0] + dx),
-                        int(y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1] + dy)
-                    )
+                    if self.scaled_pixmap is not None:
+                        img_x, img_y = self.widget_to_image_coords(
+                            int(x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0] + dx),
+                            int(y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1] + dy)
+                        )
+                    else:
+                        img_x, img_y = self.widget_to_image_coords(event.pos().x() + dx, event.pos().y() + dy)
                     new_points.append((img_x, img_y))
                 polyline.points = new_points
                 self.setCursor(Qt.CursorShape.SizeAllCursor)  # Show move cursor during polyline drag
@@ -700,14 +773,7 @@ class PDFViewer(QLabel):
                 polyline = section.polylines[p_idx]
                 
                 if polyline.page == self.current_page + 1 and self.scaled_pixmap:
-                    widget_points = []
-                    width = int(self.width())
-                    height = int(self.height())
-                    image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
-                    for x, y in polyline.points:
-                        widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
-                        widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
-                        widget_points.append(QPoint(widget_x, widget_y))
+                    widget_points = self.convert_polyline_points_to_widget(polyline.points)
                     
                     # Check if hovering over any point with larger hit area
                     handle_size = max(20, int(25 * self.zoom_factor))
@@ -786,17 +852,21 @@ class PDFViewer(QLabel):
             self.resize_handle = None
             self.resize_start_bbox = None
             self.resize_start_pos = None
-            self.update()
+            # Emit bbox_changed signal when resizing is finished
             if self.selected_bbox_index is not None:
+                self.bbox_changed.emit(self.selected_bbox_index, self.detections[self.selected_bbox_index].bbox)
                 self.bbox_edit_finished.emit(self.selected_bbox_index)
+            self.update()
             return
         if self.dragging:
             self.dragging = False
             self.drag_offset = None
             self.drag_start_bbox = None
-            self.update()
+            # Emit bbox_changed signal when dragging is finished
             if self.selected_bbox_index is not None:
+                self.bbox_changed.emit(self.selected_bbox_index, self.detections[self.selected_bbox_index].bbox)
                 self.bbox_edit_finished.emit(self.selected_bbox_index)
+            self.update()
             return
         # End polyline point drag (for both left and right mouse buttons)
         if self._polyline_point_drag_idx is not None:
@@ -829,7 +899,7 @@ class PDFViewer(QLabel):
             super().mouseReleaseEvent(event)
 
     def get_page_image_paths(self) -> List[str]:
-        """Get paths to all page images for analysis"""
+        """Get paths to all page images for analysis with caching"""
         if not self.pdf_document:
             return []
         if self.temp_dir is None:
@@ -837,27 +907,107 @@ class PDFViewer(QLabel):
         image_paths = []
         for page_num in range(self.total_pages):
             try:
-                page = self.pdf_document[page_num]
-                mat = fitz.Matrix(2.0, 2.0)
-                pix = page.get_pixmap(matrix=mat)  # type: ignore[attr-defined]
-                img_data = pix.tobytes("ppm")
-                pil_image = Image.open(io.BytesIO(img_data))
-                temp_path = os.path.join(self.temp_dir, f"page_{page_num}.png")
-                pil_image.save(temp_path)
-                image_paths.append(temp_path)
+                # Check if page is already cached
+                if page_num in self._page_cache:
+                    _, temp_path = self._page_cache[page_num]
+                    image_paths.append(temp_path)
+                    continue
+                
+                # Render page if not cached
+                result = self._render_page_to_cache(page_num)
+                if result:
+                    _, temp_path = result
+                    image_paths.append(temp_path)
             except Exception as e:
                 QMessageBox.critical(None, "Error Converting Page", f"Error converting page {page_num}: {e}")
         return image_paths
     
     def cleanup(self):
-        """Clean up temporary files"""
+        """Clean up temporary files and reset all state variables to prevent memory leaks"""
+        # Close and clear PDF document
         if self.pdf_document:
             self.pdf_document.close()
             self.pdf_document = None  # Prevent further access
 
+        # Remove temporary directory
         if self.temp_dir and os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
             self.temp_dir = None
+
+        # Clear page cache
+        self._page_cache.clear()
+        self._page_cache_rendered.clear()
+
+        # Reset PDF handling state
+        self.current_page = 0
+        self.total_pages = 0
+
+        # Reset display properties
+        self.zoom_factor = 1.0
+        self.image_offset = [0, 0]
+
+        # Clear pixmaps to free memory
+        if self.original_pixmap:
+            self.original_pixmap = None
+        if self.scaled_pixmap:
+            self.scaled_pixmap = None
+
+        # Clear all data structures that might hold references
+        self.detections.clear()
+        self.sections.clear()
+        self.section_points.clear()
+
+        # Reset pan properties
+        self.pan_start_pos = None
+        self.is_panning = False
+
+        # Reset drawing modes
+        self.add_object_mode = False
+        self.drawing_box = False
+        self.box_start = None
+        self.box_end = None
+
+        # Reset section drawing mode
+        self.add_section_mode = False
+        self.drawing_section = False
+
+        # Reset drag/resize bbox state
+        self.selected_bbox_index = None
+        self.dragging = False
+        self.resizing = False
+        self.resize_handle = None
+        self.drag_offset = None
+        self.resize_start_bbox = None
+        self.resize_start_pos = None
+
+        # Reset polyline selection state
+        self.selected_section_index = None
+        self.selected_polyline_index = None
+        self._polyline_clipboard = None
+        self._polyline_dragging = False
+        self._polyline_drag_start_pos = None
+        self._polyline_drag_start_points = None
+        self._polyline_point_drag_idx = None
+
+        # Reset cursor and display
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setText("No PDF loaded")
+        self.update()
+
+    def _validate_and_cast_bbox(self, bbox: list, min_size: int = 1) -> Tuple[int, int, int, int]:
+        """Validate bbox list and safely cast to Tuple[int, int, int, int]"""
+        if len(bbox) >= 4:
+            # Ensure all values are valid integers and maintain minimum size
+            x1, y1, x2, y2 = [int(round(v)) for v in bbox[:4]]
+            # Ensure minimum size
+            if x2 - x1 < min_size:
+                x2 = x1 + min_size
+            if y2 - y1 < min_size:
+                y2 = y1 + min_size
+            return cast(Tuple[int, int, int, int], (x1, y1, x2, y2))
+        else:
+            # Fallback: create a valid bbox with minimum size
+            return cast(Tuple[int, int, int, int], (0, 0, min_size, min_size))
 
     def get_bbox_at_pos(self, pos: QPoint) -> Optional[int]:
         """Return index of detection whose bbox contains the given widget pos, or None"""
@@ -893,15 +1043,7 @@ class PDFViewer(QLabel):
             return None
             
         # Convert polyline points to widget coordinates
-        widget_points = []
-        if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
-            width = int(self.width())
-            height = int(self.height())
-            image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
-            for x, y in polyline.points:
-                widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
-                widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
-                widget_points.append(QPoint(widget_x, widget_y))
+        widget_points = self.convert_polyline_points_to_widget(polyline.points)
         
         # Check if mouse is over any point
         handle_size = max(20, int(25 * self.zoom_factor))  # Larger hit area for consistency
@@ -1035,7 +1177,7 @@ class PDFViewer(QLabel):
         super().keyPressEvent(event)
 
     def widget_to_image_coords(self, x, y):
-        # Calculate offset for pan
+        """Convert widget coordinates to image coordinates"""
         if not self.scaled_pixmap:
             return x, y
         x_offset = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
@@ -1043,6 +1185,27 @@ class PDFViewer(QLabel):
         img_x = (x - x_offset) / self.zoom_factor
         img_y = (y - y_offset) / self.zoom_factor
         return img_x, img_y
+
+    def image_to_widget_coords(self, x, y):
+        """Convert image coordinates to widget coordinates"""
+        if not self.scaled_pixmap:
+            return x, y
+        x_offset = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
+        y_offset = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
+        widget_x = int(x * self.zoom_factor + x_offset)
+        widget_y = int(y * self.zoom_factor + y_offset)
+        return widget_x, widget_y
+
+    def convert_polyline_points_to_widget(self, points):
+        """Convert a list of image coordinate points to widget coordinates"""
+        if not self.scaled_pixmap or not points:
+            return []
+        
+        widget_points = []
+        for x, y in points:
+            widget_x, widget_y = self.image_to_widget_coords(x, y)
+            widget_points.append(QPoint(widget_x, widget_y))
+        return widget_points
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -1069,6 +1232,12 @@ class PDFViewer(QLabel):
         
         painter.end()
 
+    def safe_int(self, val):
+        try:
+            return int(val)
+        except Exception:
+            return 0
+
     def _draw_sections(self, painter: QPainter):
         """Draw all sections on the viewer"""
         if self.scaled_pixmap is None:
@@ -1079,15 +1248,7 @@ class PDFViewer(QLabel):
                     continue
                 if not polyline.points or len(polyline.points) < 2:
                     continue
-                widget_points = []
-                if self.scaled_pixmap is not None and self.width() is not None and self.height() is not None and self.image_offset is not None:
-                    width = int(self.width())
-                    height = int(self.height())
-                    image_offset = (int(self.image_offset[0]), int(self.image_offset[1]))
-                    for x, y in polyline.points:
-                        widget_x = int(x * self.zoom_factor + (width - self.scaled_pixmap.width()) // 2 + image_offset[0])
-                        widget_y = int(y * self.zoom_factor + (height - self.scaled_pixmap.height()) // 2 + image_offset[1])
-                        widget_points.append(QPoint(widget_x, widget_y))
+                widget_points = self.convert_polyline_points_to_widget(polyline.points)
                 if len(widget_points) < 2:
                     continue
                 is_selected = (s_idx == self.selected_section_index and p_idx == self.selected_polyline_index)
@@ -1113,10 +1274,10 @@ class PDFViewer(QLabel):
                 text_width = metrics.horizontalAdvance(label_text)
                 text_height = metrics.height()
                 padding = 8
-                rect_x = label_point.x() + 6
-                rect_y = label_point.y() - text_height - 6
-                rect_w = text_width + 2 * padding
-                rect_h = text_height + 2 * padding // 2
+                rect_x = self.safe_int(label_point.x() + 6)
+                rect_y = self.safe_int(label_point.y() - text_height - 6)
+                rect_w = self.safe_int(text_width + 2 * padding)
+                rect_h = self.safe_int(text_height + 2 * padding // 2)
                 painter.setBrush(QBrush(QColor(255, 255, 255, 200)))
                 painter.setPen(QPen(section.color if section.color else Qt.GlobalColor.blue, 3))
                 painter.drawRect(rect_x, rect_y, rect_w, rect_h)
@@ -1132,15 +1293,15 @@ class PDFViewer(QLabel):
                     for i, pt in enumerate(widget_points):
                         # Draw outer circle for better visibility
                         painter.setBrush(QBrush(Qt.GlobalColor.red))
-                        painter.drawEllipse(pt, handle_size + 4, handle_size + 4)
+                        painter.drawEllipse(QPoint(self.safe_int(pt.x()), self.safe_int(pt.y())), handle_size + 4, handle_size + 4)
                         # Draw inner circle
                         painter.setBrush(QBrush(Qt.GlobalColor.yellow))
-                        painter.drawEllipse(pt, handle_size, handle_size)
+                        painter.drawEllipse(QPoint(self.safe_int(pt.x()), self.safe_int(pt.y())), handle_size, handle_size)
                         
                         # Add point index for debugging
                         if getattr(self, 'debug_mode', False):
                             painter.setPen(QPen(Qt.GlobalColor.black, 1))
-                            painter.drawText(pt.x() + handle_size//2, pt.y() - handle_size//2, str(i))
+                            painter.drawText(self.safe_int(pt.x() + handle_size//2), self.safe_int(pt.y() - handle_size//2), str(i))
                             painter.setPen(QPen(Qt.GlobalColor.black, max(3, int(4 * self.zoom_factor))))
 
     def _draw_section_preview(self, painter: QPainter):
@@ -1149,11 +1310,7 @@ class PDFViewer(QLabel):
             return
         
         # Convert image coordinates to widget coordinates
-        widget_points = []
-        for img_x, img_y in self.section_points:
-            widget_x = img_x * self.zoom_factor + (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-            widget_y = img_y * self.zoom_factor + (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
-            widget_points.append(QPoint(int(widget_x), int(widget_y)))
+        widget_points = self.convert_polyline_points_to_widget(self.section_points)
         
         # Draw lines between points
         painter.setPen(QPen(Qt.GlobalColor.green, max(2, int(3 * self.zoom_factor)), Qt.PenStyle.SolidLine))
@@ -1165,7 +1322,7 @@ class PDFViewer(QLabel):
         # Draw points
         painter.setBrush(QBrush(Qt.GlobalColor.green))
         for point in widget_points:
-            painter.drawEllipse(point, 4, 4)
+            painter.drawEllipse(QPoint(self.safe_int(point.x()), self.safe_int(point.y())), 4, 4)
 
     def get_main_window(self):
         # Helper to find the main window for exit_add_object_mode
@@ -1180,26 +1337,34 @@ class PDFViewer(QLabel):
             parent = parent.parent() if hasattr(parent, 'parent') else None
         return None
 
-    def display_with_offset(self):
+    def display_with_offset(self, pixmap_to_display: Optional[QPixmap] = None):
         """Display pixmap with pan offset and draw manual box preview if needed"""
-        if self.scaled_pixmap is None:
+        # Use provided pixmap or fall back to scaled pixmap
+        source_pixmap = pixmap_to_display if pixmap_to_display is not None else self.scaled_pixmap
+        
+        if source_pixmap is None:
             return
+            
         # Create a pixmap the size of the widget
         display_pixmap = QPixmap(self.size())
         display_pixmap.fill(Qt.GlobalColor.white)
         painter = QPainter(display_pixmap)
+        
         # Calculate position with offset
-        x = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-        y = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
-        painter.drawPixmap(x, y, self.scaled_pixmap)
+        x = (self.width() - source_pixmap.width()) // 2 + self.image_offset[0]
+        y = (self.height() - source_pixmap.height()) // 2 + self.image_offset[1]
+        
+        painter.drawPixmap(x, y, source_pixmap)
         painter.end()
+        
         self.setPixmap(display_pixmap)
-        self.resize(self.scaled_pixmap.size())
+        self.resize(source_pixmap.size())
 
     def wheelEvent(self, event):
         # Ctrl+Wheel: zoom, Shift+Wheel: pan left/right, else pan up/down
         modifiers = event.modifiers()
         angle = event.angleDelta().y()
+        
         if modifiers & Qt.KeyboardModifier.ControlModifier:
             # Zoom in/out, centered on mouse position
             if not self.scaled_pixmap:
@@ -1235,17 +1400,21 @@ class PDFViewer(QLabel):
             self.image_offset[0] += int(target_x - new_img_x)
             self.image_offset[1] += int(target_y - new_img_y)
             
+            # Single update_display call for zoom operation
             self.update_display()
             self.zoom_changed.emit(self.zoom_factor)
-        elif modifiers & Qt.KeyboardModifier.ShiftModifier:
-            # Pan left/right
-            delta = event.angleDelta().y() // 8  # 1 notch = 15 degrees, 120 units
-            self.image_offset[0] += int(delta)
-            self.update_display()
         else:
-            # Pan up/down
-            delta = event.angleDelta().y() // 8
-            self.image_offset[1] += int(delta)
+            # Pan operations (both Shift+Wheel and regular wheel)
+            delta = event.angleDelta().y() // 8  # 1 notch = 15 degrees, 120 units
+            
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                # Pan left/right
+                self.image_offset[0] += int(delta)
+            else:
+                # Pan up/down
+                self.image_offset[1] += int(delta)
+            
+            # Single update_display call for pan operation
             self.update_display()
 
     def leaveEvent(self, event):
@@ -1348,8 +1517,9 @@ class PDFViewer(QLabel):
             p_idx = int(self.selected_polyline_index)
             section = self.sections[s_idx]
             polyline = section.polylines[p_idx]
-            polyline.points.insert(insert_idx, (pos_xy[0] / self.zoom_factor - (self.width() - self.scaled_pixmap.width()) // 2 / self.zoom_factor - self.image_offset[0] / self.zoom_factor,
-                                                pos_xy[1] / self.zoom_factor - (self.height() - self.scaled_pixmap.height()) // 2 / self.zoom_factor - self.image_offset[1] / self.zoom_factor))
+            # Convert widget coordinates to image coordinates
+            img_x, img_y = self.widget_to_image_coords(pos_xy[0], pos_xy[1])
+            polyline.points.insert(insert_idx, (img_x, img_y))
             self.update()
 
     def toggle_debug_mode(self):

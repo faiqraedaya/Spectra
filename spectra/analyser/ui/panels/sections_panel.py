@@ -67,11 +67,6 @@ class SectionsPanel:
         down_button.clicked.connect(lambda: move_section_down(self.main_window))
         move_layout.addWidget(down_button)
         sections_layout.addLayout(move_layout)
-
-        # Import CSV button
-        import_button = QPushButton("Import CSV")
-        import_button.clicked.connect(lambda: import_sections_csv(self.main_window))
-        sections_layout.addWidget(import_button)
         
         sections_layout.addStretch()
 

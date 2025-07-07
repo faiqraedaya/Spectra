@@ -6,7 +6,7 @@ from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import QMenu
 
 from detection.types import Detection
-from sections.sections import Section, update_sections_table, polyline_intersects_bbox, assign_objects_to_sections, point_in_polygon, get_section_for_bbox
+from sections.sections import Section, update_sections_table, polyline_intersects_bbox, assign_objects_to_sections, point_in_polygon, get_section_for_bbox, invalidate_section_assignment_cache
 
 class DetectionManager:
     """Manages detection operations and state"""
@@ -73,6 +73,8 @@ class DetectionManager:
                 new_det.page_num = self.main_window.pdf_viewer.current_page + 1
                 
             self.main_window.detections.append(new_det)
+            # Invalidate cache since detections changed
+            invalidate_section_assignment_cache(self.main_window)
             # Assign section by polyline if possible
             self._assign_detection_to_section(new_det)
             # Robust: reassign all objects after any change
@@ -102,6 +104,7 @@ class DetectionManager:
             
             if reply == QMessageBox.StandardButton.Yes:
                 self.main_window.detections.pop(idx)
+                invalidate_section_assignment_cache(self.main_window)
                 self.main_window.update_objects_table()
                 self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
                 self.main_window.update_results_table()
@@ -123,7 +126,8 @@ class DetectionManager:
                 # Handle new section creation
                 self._handle_new_section(detection.section, detection.line_size)
                 
-                from sections.sections import assign_objects_to_sections
+                # Invalidate cache since detection properties changed
+                invalidate_section_assignment_cache(self.main_window)
                 assign_objects_to_sections(self.main_window)
                 self.main_window.update_objects_table()
                 self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
@@ -157,6 +161,7 @@ class DetectionManager:
             self.main_window.undo_stack.append(self.main_window.detections.copy())
             self.main_window.redo_stack.clear()
             self.main_window.detections.append(new_detection)
+            invalidate_section_assignment_cache(self.main_window)
             assign_objects_to_sections(self.main_window)
             self.main_window.update_objects_table()
             self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
@@ -169,7 +174,8 @@ class DetectionManager:
         ]:
             new_section = Section(section_name)
             self.main_window.sections_list.append(new_section)
-            update_sections_table(self.main_window)
+            # Use debounced updates
+            self.main_window.update_sections_table()
             self.main_window.update_section_filter_dropdown()
             
         # If section has no line size, set it now
@@ -180,7 +186,8 @@ class DetectionManager:
             )
             if section and section.line_size is None and line_size is not None:
                 section.line_size = line_size
-                update_sections_table(self.main_window)
+                # Use debounced update
+                self.main_window.update_sections_table()
 
     def _assign_detection_to_section(self, detection):
         """Assign a detection to the first section whose polyline it touches. Returns True if assigned."""

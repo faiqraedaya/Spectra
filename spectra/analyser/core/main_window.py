@@ -3,7 +3,7 @@ import os
 import re
 from typing import List
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt, QTimer, QThread
 from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
@@ -45,6 +45,17 @@ from ui.panels.results_panel import ResultsPanel
 from ui.panels.sections_panel import SectionsPanel
 from ui.panels.viewer_panel import ViewerPanel
 from utils.frequency import FrequencyTable
+from utils.ui_updater import (
+    get_update_manager,
+    request_update,
+    request_immediate_update,
+    UPDATE_SECTIONS_TABLE,
+    UPDATE_OBJECTS_TABLE,
+    UPDATE_RESULTS_TABLE,
+    UPDATE_SECTION_FILTER,
+    UPDATE_NAVIGATION,
+    UPDATE_ZOOM
+)
 
 class Spectra(QMainWindow):
     """Modular main application window using separated components"""
@@ -85,12 +96,23 @@ class Spectra(QMainWindow):
         # Store frequency table instance
         self.frequency_table = FrequencyTable(str(FREQUENCY_CSV_PATH))
 
+        # Initialize UI update manager
+        self.update_manager = get_update_manager()
+        self.update_manager.updates_ready.connect(self._apply_pending_updates)
+
         self.init_ui()
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
     def closeEvent(self, event):
         """Clean up on application close"""
-        # TODO: Add any cleanup code here
+        # Clean up analysis thread
+        if hasattr(self, 'analysis_manager'):
+            self.analysis_manager.cleanup()
+        
+        # Clean up PDF viewer
+        if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
+            self.viewer_panel.pdf_viewer.cleanup()
+        
         event.accept()
 
     def init_ui(self):
@@ -304,17 +326,62 @@ class Spectra(QMainWindow):
         self.viewer_panel.update_navigation_controls()
 
     def update_objects_table(self):
+        """Update the objects table with debouncing"""
+        request_update(UPDATE_OBJECTS_TABLE)
+    
+    def _update_objects_table_safe(self):
+        """Thread-safe internal method to update objects table"""
         self.objects_panel.update_objects_table()
+    
+    def _update_objects_table_immediate(self):
+        """Immediate update of objects table (called by update manager)"""
+        if QThread.currentThread() != self.thread():
+            # If called from a different thread, schedule the update on the main thread
+            QTimer.singleShot(0, self._update_objects_table_safe)
+        else:
+            # Already on main thread, update directly
+            self._update_objects_table_safe()
 
     def update_sections_table(self):
+        """Update the sections table with debouncing"""
+        request_update(UPDATE_SECTIONS_TABLE)
+    
+    def _update_sections_table_immediate(self):
+        """Immediate update of sections table (called by update manager)"""
         update_sections_table(self)
 
     def update_section_filter_dropdown(self):
+        """Update section filter dropdowns with debouncing"""
+        request_update(UPDATE_SECTION_FILTER)
+    
+    def _update_section_filter_dropdown_immediate(self):
+        """Immediate update of section filter dropdowns (called by update manager)"""
         self.objects_panel.update_section_filter_dropdown()
         self.results_panel.update_results_section_filter_dropdown()
 
     def update_results_table(self):
+        """Update the results table with debouncing"""
+        request_update(UPDATE_RESULTS_TABLE)
+    
+    def _update_results_table_immediate(self):
+        """Immediate update of results table (called by update manager)"""
         self.results_panel.update_results_table()
+    
+    def _apply_pending_updates(self):
+        """Apply all pending UI updates based on what was requested"""
+        update_manager = get_update_manager()
+        
+        if update_manager.has_pending_updates(UPDATE_SECTIONS_TABLE):
+            self._update_sections_table_immediate()
+        
+        if update_manager.has_pending_updates(UPDATE_OBJECTS_TABLE):
+            self._update_objects_table_immediate()
+        
+        if update_manager.has_pending_updates(UPDATE_RESULTS_TABLE):
+            self._update_results_table_immediate()
+        
+        if update_manager.has_pending_updates(UPDATE_SECTION_FILTER):
+            self._update_section_filter_dropdown_immediate()
 
     def import_sections_csv(self):
         import_sections_csv(self)

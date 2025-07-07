@@ -44,21 +44,13 @@ class ProjectManager:
         self.main_window.redo_stack.clear()
         self.main_window.sections_list.clear()
         
-        # Update UI
+        # Update UI - these are already debounced in the main window
         self.main_window.update_sections_table()
         self.main_window.update_section_filter_dropdown()
         self.main_window.update_objects_table()
         
-        # Reset PDF viewer
+        # Reset PDF viewer (cleanup method handles all state reset)
         self.main_window.pdf_viewer.cleanup()
-        self.main_window.pdf_viewer.setText("No PDF loaded")
-        self.main_window.pdf_viewer.pdf_document = None
-        self.main_window.pdf_viewer.current_page = 0
-        self.main_window.pdf_viewer.total_pages = 0
-        self.main_window.pdf_viewer.original_pixmap = None
-        self.main_window.pdf_viewer.scaled_pixmap = None
-        self.main_window.pdf_viewer.detections = []
-        self.main_window.pdf_viewer.set_sections([])
         return None  # No file path for new project
 
     def open_project(self):
@@ -87,14 +79,13 @@ class ProjectManager:
             self.main_window.overlap = data.get("overlap", 0.3)
             self.main_window.api_key = data.get("api_key", None)
             
-            # Update UI
+            # Update UI - these are already debounced in the main window
             self.main_window.update_sections_table()
             self.main_window.update_section_filter_dropdown()
             self.main_window.update_objects_table()
             
             # Do not auto-load PDF, just update viewer state
             self.main_window.pdf_viewer.cleanup()
-            self.main_window.pdf_viewer.setText("No PDF loaded")
             
             self.main_window.pdf_viewer.set_detections(self.main_window.detections)
             self.main_window.pdf_viewer.set_sections(self.main_window.sections_list)
