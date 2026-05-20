@@ -1,8 +1,8 @@
 from typing import List
 
+from PySide6.QtCore import QThread, Signal
 from roboflow import Roboflow
 
-from PySide6.QtCore import QThread, Signal
 from detection.types import Detection
 
 class RoboflowAnalysisThread(QThread):
@@ -43,24 +43,29 @@ class RoboflowAnalysisThread(QThread):
                 # Emit progress signal (will be handled on main thread)
                 self.progress_updated.emit(i + 1, len(self.image_paths))
                 
+                # Call the model to predict detections
                 result = model.predict(
                     image_path, 
                     confidence=int(self.conf_threshold * 100),
                     overlap=self.overlap_threshold
                 ).json()
                 
+                # Convert predictions to detections (bbox, confidence, class, page_num, source)
                 page_detections = []
                 for prediction in result["predictions"]:
+                    # Get prediction coordinates
                     x_center = prediction["x"]
                     y_center = prediction["y"]
                     width = prediction["width"]
                     height = prediction["height"]
                     
+                    # Convert to bbox coordinates
                     x1 = int(x_center - width / 2)
                     y1 = int(y_center - height / 2)
                     x2 = int(x_center + width / 2)
                     y2 = int(y_center + height / 2)
                     
+                    # Create detection object
                     detection = Detection(
                         name=prediction["class"],
                         confidence=prediction["confidence"],
@@ -68,8 +73,9 @@ class RoboflowAnalysisThread(QThread):
                         page_num=i + 1,
                         source="model"
                     )
-                    page_detections.append(detection)
+                    page_detections.append(detection) # Add detection to page detections
                 
+                # Add page detections to all detections
                 all_detections.extend(page_detections)
             
             # Emit completion signal (will be handled on main thread)

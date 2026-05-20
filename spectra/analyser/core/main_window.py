@@ -3,7 +3,7 @@ import os
 import re
 from typing import List
 
-from PySide6.QtCore import QPoint, Qt, QTimer, QThread
+from PySide6.QtCore import QPoint, QThread, QTimer, Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
@@ -46,15 +46,16 @@ from ui.panels.sections_panel import SectionsPanel
 from ui.panels.viewer_panel import ViewerPanel
 from utils.frequency import FrequencyTable
 from utils.ui_updater import (
-    get_update_manager,
-    request_update,
-    request_immediate_update,
-    UPDATE_SECTIONS_TABLE,
+    UPDATE_NAVIGATION,
     UPDATE_OBJECTS_TABLE,
     UPDATE_RESULTS_TABLE,
+    UPDATE_SECTIONS_TABLE,
     UPDATE_SECTION_FILTER,
-    UPDATE_NAVIGATION,
-    UPDATE_ZOOM
+    UPDATE_ZOOM,
+    get_update_manager,
+    request_immediate_update,
+    request_update,
+    request_group_update,
 )
 
 class Spectra(QMainWindow):
@@ -62,7 +63,7 @@ class Spectra(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.project_name = "New Project"  # Track current project name
+        self.project_name = "New Project" 
         self.setWindowTitle(f"{APP_TITLE} - {self.project_name}")
         self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         self.version = APP_VERSION
@@ -117,24 +118,32 @@ class Spectra(QMainWindow):
 
     def init_ui(self):
         """Initialize the user interface"""
+        # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+
+        # Create main splitter
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Create layout
         layout = central_widget.layout()
         if layout is None:
             layout = QVBoxLayout()
             central_widget.setLayout(layout)
+
+        # Add main splitter to layout
         layout.addWidget(main_splitter)
 
         # Create menus
         self.menu_manager.create_menus()
 
-        # Create panels
+        # Create sections widget as a tab widget
         tab_widget = QTabWidget()
         sections_widget = self.sections_panel.create_panel()
         tab_widget.addTab(sections_widget, "Sections")
         main_splitter.addWidget(tab_widget)
 
+        # Create viewer widget as a tab widget
         tab_widget = QTabWidget()
         viewer_widget = self.viewer_panel.create_panel()
         tab_widget.addTab(viewer_widget, "Viewer")
@@ -164,14 +173,13 @@ class Spectra(QMainWindow):
 
     def _connect_signals(self):
         """Connect all signal handlers"""
-        # PDF viewer signals - connect only the ones not handled by viewer panel
+        # Connect signals for PDF viewer
         if self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.manual_box_drawn.connect(self.detection_manager.add_manual_detection)
             self.viewer_panel.pdf_viewer.bbox_changed.connect(self.detection_manager.on_bbox_changed)
             self.viewer_panel.pdf_viewer.section_drawn.connect(self.on_section_drawn)
             self.viewer_panel.pdf_viewer.section_right_clicked.connect(self.on_section_right_clicked)
 
-    # Navigation methods (delegated to viewer panel)
     def first_page(self):
         if self.viewer_panel.pdf_viewer and self.viewer_panel.pdf_viewer.pdf_document:
             self.viewer_panel.pdf_viewer.set_page(0)
@@ -213,32 +221,27 @@ class Spectra(QMainWindow):
             self.viewer_panel.pdf_viewer.set_add_object_mode(True)
         self.set_mode_label("Add Object")
 
-    def exit_add_object_mode(self):
+    def exit_add_object_mode(self):        
         if self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.set_add_object_mode(False)
         self.set_mode_label("Normal")
 
     def enter_add_section_mode(self):
-        """Enter section drawing mode"""
         if self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.set_add_section_mode(True)
         self.set_mode_label("Draw Section")
 
     def exit_add_section_mode(self):
-        """Exit section drawing mode"""
         if self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.set_add_section_mode(False)
         self.set_mode_label("Normal")
 
     def on_section_drawn(self, points):
-        """Handle when a new section is drawn"""
         add_section_with_points(self, points)
 
     def on_section_right_clicked(self, section_index: int, global_pos=None):
-        """Handle right-click on a section"""
         show_section_context_menu(self, section_index, global_pos=global_pos)
 
-    # Project management methods (delegated to project manager)
     def new_project(self):
         self.project_manager.new_project()
         self.project_name = "New Project"
@@ -264,7 +267,6 @@ class Spectra(QMainWindow):
     def save_pdf(self):
         self.project_manager.save_pdf()
 
-    # Detection management methods (delegated to detection manager)
     def undo(self):
         self.detection_manager.undo()
 
@@ -272,6 +274,7 @@ class Spectra(QMainWindow):
         self.detection_manager.redo()
 
     def menu_cut(self):
+        """Cut a detection at the selected bounding box"""
         if not self.viewer_panel.pdf_viewer:
             return
         idx = self.viewer_panel.pdf_viewer.selected_bbox_index
@@ -280,6 +283,7 @@ class Spectra(QMainWindow):
         self.menu_manager.update_edit_menu_actions()
 
     def menu_copy(self):
+        """Copy a detection at the selected bounding box"""
         if not self.viewer_panel.pdf_viewer:
             return
         idx = self.viewer_panel.pdf_viewer.selected_bbox_index
@@ -288,6 +292,7 @@ class Spectra(QMainWindow):
         self.menu_manager.update_edit_menu_actions()
 
     def menu_paste(self):
+        """Paste a detection at the selected bounding box or at the center of the viewer"""
         if not self.viewer_panel.pdf_viewer:
             return
         idx = self.viewer_panel.pdf_viewer.selected_bbox_index
@@ -301,40 +306,49 @@ class Spectra(QMainWindow):
         self.menu_manager.update_edit_menu_actions()
 
     def get_filtered_detections(self):
+        """Get filtered detections based on section filter"""
         return self.detection_manager.get_filtered_detections()
 
     def apply_section_filter(self):
+        """Apply section filter to the objects table and viewer"""
         self.objects_panel.update_objects_table()
         if self.viewer_panel.pdf_viewer:
             self.viewer_panel.pdf_viewer.set_detections(self.get_filtered_detections())
 
-    # Analysis methods (delegated to analysis manager)
     def run_analysis(self):
+        """Run Roboflow analysis"""
         self.analysis_manager.run_analysis()
 
     def set_confidence(self):
+        """Set confidence level for analysis"""
         self.analysis_manager.set_confidence()
 
     def set_overlap(self):
+        """Set overlap level for analysis"""
         self.analysis_manager.set_overlap()
 
     def set_api_key(self):
+        """Set Roboflow API key"""
         self.analysis_manager.set_api_key()
 
-    # UI update methods
     def update_navigation_controls(self):
+        """Update navigation controls"""
         self.viewer_panel.update_navigation_controls()
 
     def update_objects_table(self):
-        """Update the objects table with debouncing"""
-        request_update(UPDATE_OBJECTS_TABLE)
+        """Update the objects table with improved batching"""
+        request_update(UPDATE_OBJECTS_TABLE, priority="normal")
+    
+    def update_objects_table_immediate(self):
+        """Immediate update of objects table for critical operations"""
+        self._update_objects_table_safe()
     
     def _update_objects_table_safe(self):
-        """Thread-safe internal method to update objects table"""
+        """Update objects table"""
         self.objects_panel.update_objects_table()
     
     def _update_objects_table_immediate(self):
-        """Immediate update of objects table (called by update manager)"""
+        """Immediate update of objects table"""
         if QThread.currentThread() != self.thread():
             # If called from a different thread, schedule the update on the main thread
             QTimer.singleShot(0, self._update_objects_table_safe)
@@ -343,50 +357,60 @@ class Spectra(QMainWindow):
             self._update_objects_table_safe()
 
     def update_sections_table(self):
-        """Update the sections table with debouncing"""
-        request_update(UPDATE_SECTIONS_TABLE)
+        """Update the sections table with improved batching"""
+        request_update(UPDATE_SECTIONS_TABLE, priority="normal")
     
     def _update_sections_table_immediate(self):
-        """Immediate update of sections table (called by update manager)"""
+        """Immediate update of sections table"""
         update_sections_table(self)
 
     def update_section_filter_dropdown(self):
-        """Update section filter dropdowns with debouncing"""
-        request_update(UPDATE_SECTION_FILTER)
+        """Update section filter dropdowns with improved batching"""
+        request_update(UPDATE_SECTION_FILTER, priority="normal")
     
     def _update_section_filter_dropdown_immediate(self):
-        """Immediate update of section filter dropdowns (called by update manager)"""
+        """Immediate update of section filter dropdowns"""
         self.objects_panel.update_section_filter_dropdown()
         self.results_panel.update_results_section_filter_dropdown()
 
     def update_results_table(self):
-        """Update the results table with debouncing"""
-        request_update(UPDATE_RESULTS_TABLE)
+        """Update the results table with improved batching"""  
+        request_update(UPDATE_RESULTS_TABLE, priority="normal")
+    
+    def update_results_table_immediate(self):
+        """Immediate update of results table for critical operations"""
+        self._update_results_table_immediate()
     
     def _update_results_table_immediate(self):
-        """Immediate update of results table (called by update manager)"""
+        """Immediate update of results table"""
         self.results_panel.update_results_table()
     
-    def _apply_pending_updates(self):
-        """Apply all pending UI updates based on what was requested"""
-        update_manager = get_update_manager()
-        
-        if update_manager.has_pending_updates(UPDATE_SECTIONS_TABLE):
+    def update_all_data_tables(self):
+        """Update all data-related tables in one batch operation"""
+        request_group_update("data_changed", delay=16)  # Use 16ms for smooth UI
+    
+    def update_display_components(self):
+        """Update all display-related components in one batch operation"""
+        request_group_update("display_update", delay=8)  # Faster for display updates
+    
+    def _apply_pending_updates(self, updates_snapshot):
+        """Apply all pending UI updates using provided snapshot for determinism"""
+        # Use the snapshot of updates to decide what to apply now
+        if UPDATE_SECTIONS_TABLE in updates_snapshot:
             self._update_sections_table_immediate()
-        
-        if update_manager.has_pending_updates(UPDATE_OBJECTS_TABLE):
+        if UPDATE_OBJECTS_TABLE in updates_snapshot:
             self._update_objects_table_immediate()
-        
-        if update_manager.has_pending_updates(UPDATE_RESULTS_TABLE):
+        if UPDATE_RESULTS_TABLE in updates_snapshot:
             self._update_results_table_immediate()
-        
-        if update_manager.has_pending_updates(UPDATE_SECTION_FILTER):
+        if UPDATE_SECTION_FILTER in updates_snapshot:
             self._update_section_filter_dropdown_immediate()
 
     def import_sections_csv(self):
+        """Import sections from CSV"""
         import_sections_csv(self)
 
     def update_zoom_label(self, zoom_factor: float):
+        """Update zoom label"""
         self.viewer_panel.update_zoom_label(zoom_factor)
 
     def on_page_input_changed(self):
@@ -427,18 +451,19 @@ class Spectra(QMainWindow):
                 self.viewer_panel.page_input.setText(f"{current_page + 1}/{total_pages}")
 
     def on_bbox_edit_finished(self, idx):
+        """Update results table when bbox edit is finished"""
         self.update_results_table()
 
     def on_bbox_right_clicked(self, bbox_index: int):
-        """Delegate bbox right click to detection manager"""
+        """Handle right click on a bounding box"""
         self.detection_manager.on_bbox_right_clicked(bbox_index)
 
     def on_background_right_clicked(self, pos):
-        """Delegate background right click to detection manager"""
+        """Handle right click on the background"""
         self.detection_manager.on_background_right_clicked(pos)
 
-    # About/Help methods
     def show_about(self):
+        """Show about dialog"""
         QMessageBox.information(
             self,
             "About",
@@ -447,7 +472,8 @@ class Spectra(QMainWindow):
             "© Faiq Raedaya 2025",
         )
 
-    def show_help(self):
+    def show_help(self):    
+        """Show help dialog"""
         QMessageBox.information(
             self,
             "Help",
@@ -459,17 +485,21 @@ class Spectra(QMainWindow):
             "5. Right-click bounding boxes to edit and delete detections.\n"
             "6. Add objects manually using Ctrl+Space or Edit>Add Object.\n"
             "7. Export CSV and JSON once all objects are assigned to a Section.\n\n"
+
             "Controls:\n"
             "- Middle Mouse Button: Pan around\n"
             "- Ctrl+Scroll: Zoom in/out (centered on mouse cursor)\n"
             "- Shift+Scroll: Pan left/right horizontally\n"
             "- Scroll: Pan up/down vertically\n\n"
+            
             "Modes:\n"
             "- Normal: Default mode for viewing and editing objects.\n"
             "- Add Object: Add objects manually by clicking on the PDF.\n"
             "- Draw Section: Draw sections by clicking and dragging on the PDF.\n\n"
+
             "Keyboard Shortcuts:\n"
             "- Ctrl+Space: Add object manually\n"
+            "- Ctrl+Shift+Space: Add section manually\n"
             "- Ctrl+N: New project\n"
             "- Ctrl+O: Open project\n"
             "- Ctrl+S: Save project\n"
@@ -484,12 +514,12 @@ class Spectra(QMainWindow):
 
     def export_results_to_csv(self):
         """Export the results table to a CSV file."""
-        if not self.results_panel.results_table:
+        if not self.results_panel.results_table: # Check if results table exists
             return
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Export Results to CSV", "", "CSV Files (*.csv)"
         )
-        if not file_path:
+        if not file_path: # Check if file path is valid
             return
         with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -503,43 +533,48 @@ class Spectra(QMainWindow):
                 "Total",
             ]
             writer.writerow(headers)
-            for row in range(self.results_panel.results_table.rowCount()):
+            for row in range(self.results_panel.results_table.rowCount()): # Iterate through rows
                 writer.writerow(
                     [
                         (
-                            self.results_panel.results_table.item(row, col).text()
-                            if self.results_panel.results_table.item(row, col)
+                            self.results_panel.results_table.item(row, col).text() # Get text from item
+                            if self.results_panel.results_table.item(row, col) # Check if item exists
                             else ""
                         )
-                        for col in range(self.results_panel.results_table.columnCount())
+                        for col in range(self.results_panel.results_table.columnCount()) # Iterate through columns
                     ]
                 )
 
-    # Property accessors for managers
     @property
     def pdf_viewer(self):
+        """Get PDF viewer"""
         return self.viewer_panel.pdf_viewer
 
     @property
     def progress_bar(self):
+        """Get progress bar"""
         return self.objects_panel.progress_bar
 
     @property
     def section_filter_dropdown(self):
+        """Get section filter dropdown"""
         return self.objects_panel.section_filter_dropdown
 
     @property
-    def category_filter_dropdown(self):
+    def category_filter_dropdown(self): 
+        """Get category filter dropdown"""
         return self.objects_panel.category_filter_dropdown
 
     @property
     def clipboard_detection(self):
+        """Get clipboard detection"""
         return self.detection_manager.clipboard_detection
 
     def set_mode_label(self, mode: str):
+        """Set mode label"""
         if self.mode_label:
             self.mode_label.setText(f"Mode: {mode}")
 
     def update_window_title(self):
-        """Update the window title with the current project name."""
+        """Update the window title with the current project name"""
         self.setWindowTitle(f"{APP_TITLE} - {self.project_name}") 

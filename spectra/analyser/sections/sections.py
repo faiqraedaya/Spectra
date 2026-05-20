@@ -9,6 +9,16 @@ from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
+# Import performance monitoring
+try:
+    from utils.performance_monitor import monitor_performance
+except ImportError:
+    # Fallback decorator if performance monitoring is not available
+    def monitor_performance(operation: str):
+        def decorator(func):
+            return func
+        return decorator
+
 RAINBOW_COLORS = 12  # Number of distinct colors before looping
 
 def get_next_rainbow_color(index: int) -> QColor:
@@ -78,18 +88,22 @@ class Section:
         if self._bbox_cache is not None and self._last_polyline_count == len(self.polylines):
             return self._bbox_cache
             
-        # Calculate bounding box
+        # Calculate bounding box with early exit optimization
         min_x = min_y = float('inf')
         max_x = max_y = float('-inf')
         
+        point_count = 0
         for polyline in self.polylines:
+            if not polyline.points:
+                continue
             for point in polyline.points:
                 min_x = min(min_x, point[0])
                 min_y = min(min_y, point[1])
                 max_x = max(max_x, point[0])
                 max_y = max(max_y, point[1])
+                point_count += 1
         
-        if min_x == float('inf'):
+        if point_count == 0:
             self._bbox_cache = None
         else:
             self._bbox_cache = (min_x, min_y, max_x, max_y)
@@ -109,16 +123,19 @@ def move_section_up(self):
     selected = self.sections_panel.sections_table.currentRow()
     if selected > 0:
         self.sections_list[selected-1], self.sections_list[selected] = self.sections_list[selected], self.sections_list[selected-1]
-        # Use debounced update
-        if hasattr(self, 'update_sections_table'):
-            self.update_sections_table()
+        # Use batched updates to refresh all dependent tables
+        if hasattr(self, 'update_all_data_tables'):
+            self.update_all_data_tables()
         else:
-            update_sections_table(self)
+            if hasattr(self, 'update_sections_table'):
+                self.update_sections_table()
+            else:
+                update_sections_table(self)
+            if hasattr(self, 'update_section_filter_dropdown'):
+                self.update_section_filter_dropdown()
+            else:
+                update_section_filter_dropdown(self)
         self.sections_panel.sections_table.selectRow(selected-1)
-        if hasattr(self, 'update_section_filter_dropdown'):
-            self.update_section_filter_dropdown()
-        else:
-            update_section_filter_dropdown(self)
 
 def move_section_down(self):
     """Move the selected section down in the list"""
@@ -127,16 +144,19 @@ def move_section_down(self):
     selected = self.sections_panel.sections_table.currentRow()
     if 0 <= selected < len(self.sections_list)-1:
         self.sections_list[selected+1], self.sections_list[selected] = self.sections_list[selected], self.sections_list[selected+1]
-        # Use debounced update
-        if hasattr(self, 'update_sections_table'):
-            self.update_sections_table()
+        # Use batched updates to refresh all dependent tables
+        if hasattr(self, 'update_all_data_tables'):
+            self.update_all_data_tables()
         else:
-            update_sections_table(self)
+            if hasattr(self, 'update_sections_table'):
+                self.update_sections_table()
+            else:
+                update_sections_table(self)
+            if hasattr(self, 'update_section_filter_dropdown'):
+                self.update_section_filter_dropdown()
+            else:
+                update_section_filter_dropdown(self)
         self.sections_panel.sections_table.selectRow(selected+1)
-        if hasattr(self, 'update_section_filter_dropdown'):
-            self.update_section_filter_dropdown()
-        else:
-            update_section_filter_dropdown(self)
 
 def import_sections_csv(self):
     """Import sections from a CSV file"""
@@ -170,15 +190,18 @@ def import_sections_csv(self):
                         self.sections_list.append(new_section)
                         existing_names.add(section_name)
             
-            # Use debounced updates
-            if hasattr(self, 'update_sections_table'):
-                self.update_sections_table()
+            # Use batched updates
+            if hasattr(self, 'update_all_data_tables'):
+                self.update_all_data_tables()
             else:
-                update_sections_table(self)
-            if hasattr(self, 'update_section_filter_dropdown'):
-                self.update_section_filter_dropdown()
-            else:
-                update_section_filter_dropdown(self)
+                if hasattr(self, 'update_sections_table'):
+                    self.update_sections_table()
+                else:
+                    update_sections_table(self)
+                if hasattr(self, 'update_section_filter_dropdown'):
+                    self.update_section_filter_dropdown()
+                else:
+                    update_section_filter_dropdown(self)
             
         except Exception as e:
             QMessageBox.warning(self, "Import Error", f"Failed to import CSV file: {str(e)}")
@@ -213,68 +236,54 @@ def update_sections_table(self):
     self.sections_panel.sections_table.blockSignals(False)
 
 def handle_section_edit(self, item):
-    """Handle editing of section table items"""
-    if not self.sections_panel.sections_table:
+    """Handle section edit with optimized updates"""
+    if not item:
         return
+    
     row = item.row()
-    col = item.column()
-    text = item.text().strip()
-    
-    if row >= len(self.sections_list):
+    if row < 0 or row >= len(self.sections_list):
         return
-        
+    
     section = self.sections_list[row]
+    col = item.column()
     
-    if col == 0:  # Section name
-        if not text:
-            # Prevent empty names
-            if hasattr(self, 'update_sections_table'):
-                self.update_sections_table()
-            else:
-                update_sections_table(self)
-            return
-        section.name = text
-    elif col == 1:  # Line size
-        if text:
-            try:
-                value = float(text)
-                if value > 2000:
-                    reply = QMessageBox.question(
-                        self,
-                        "Large Line Size",
-                        "You have entered a line size greater than 2000 mm. Are you sure?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No
-                    )
-                    if reply != QMessageBox.StandardButton.Yes:
-                        if hasattr(self, 'update_sections_table'):
-                            self.update_sections_table()
-                        else:
-                            update_sections_table(self)
-                        return
-                section.line_size = value
-            except ValueError:
-                # Invalid number, revert
-                QMessageBox.warning(
-                    self,
-                    "Invalid Input",
-                    "Please enter a valid number for line size."
-                )
-                if hasattr(self, 'update_sections_table'):
-                    self.update_sections_table()
-                else:
-                    update_sections_table(self)
+    if col == 0:  # Name column
+        new_name = item.text()
+        if new_name and new_name != section.name:
+            # Check for duplicate names
+            existing_names = [s.name for s in self.sections_list if s != section]
+            if new_name in existing_names:
+                QMessageBox.warning(self, "Duplicate Name", f"Section name '{new_name}' already exists.")
+                item.setText(section.name)  # Revert the change
                 return
-        else:
-            section.line_size = None
+            section.name = item.setText(new_name)
+            # Invalidate cache but don't immediately reassign
+            invalidate_section_assignment_cache(self)
+    elif col == 1:  # Line size column
+        try:
+            new_line_size = float(item.text()) if item.text() else None
+            section.line_size = new_line_size
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Value", "Line size must be a number.")
+            item.setText(str(section.line_size) if section.line_size else "")
+            return
     
-    # Update the table to reflect the calculated values
-    if hasattr(self, 'update_sections_table'):
-        self.update_sections_table()
+    # Update all related tables to reflect the changes
+    if hasattr(self, 'update_all_data_tables'):
+        self.update_all_data_tables()
     else:
-        update_sections_table(self)
-    invalidate_section_assignment_cache(self)
-    assign_objects_to_sections(self)
+        if hasattr(self, 'update_sections_table'):
+            self.update_sections_table()
+        else:
+            update_sections_table(self)
+        if hasattr(self, 'update_section_filter_dropdown'):
+            self.update_section_filter_dropdown()
+        else:
+            update_section_filter_dropdown(self)
+    
+    # Only reassign objects if sections actually changed
+    if col == 0:  # Name change affects assignments
+        assign_objects_to_sections(self)
 
 def update_section_filter_dropdown(self):
     """Update the section filter dropdown with current section names"""
@@ -307,19 +316,24 @@ def add_section_with_points(self, points):
             for poly in polylines:
                 poly.page = getattr(self, 'current_page', 1)
                 section.polylines.append(poly)
-            # Use debounced updates
-            if hasattr(self, 'update_sections_table'):
-                self.update_sections_table()
+            # Batch UI updates
+            if hasattr(self, 'update_all_data_tables'):
+                self.update_all_data_tables()
             else:
-                update_sections_table(self)
-            if hasattr(self, 'update_section_filter_dropdown'):
-                self.update_section_filter_dropdown()
-            else:
-                update_section_filter_dropdown(self)
+                # Fallback to individual updates
+                if hasattr(self, 'update_sections_table'):
+                    self.update_sections_table()
+                else:
+                    update_sections_table(self)
+                if hasattr(self, 'update_section_filter_dropdown'):
+                    self.update_section_filter_dropdown()
+                else:
+                    update_section_filter_dropdown(self)
             if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
                 self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
             if self.sections_panel.sections_table:
                 self.sections_panel.sections_table.selectRow(self.sections_list.index(section))
+            # Only reassign objects once after all changes
             assign_objects_to_sections(self)
             return
     # Otherwise, create a new section
@@ -327,19 +341,24 @@ def add_section_with_points(self, points):
     color = dialog.get_color()
     new_section = Section(name, line_size=line_size, polylines=polylines, color=color)
     self.sections_list.append(new_section)
-    # Use debounced updates
-    if hasattr(self, 'update_sections_table'):
-        self.update_sections_table()
+    # Batch UI updates
+    if hasattr(self, 'update_all_data_tables'):
+        self.update_all_data_tables()
     else:
-        update_sections_table(self)
-    if hasattr(self, 'update_section_filter_dropdown'):
-        self.update_section_filter_dropdown()
-    else:
-        update_section_filter_dropdown(self)
+        # Fallback to individual updates
+        if hasattr(self, 'update_sections_table'):
+            self.update_sections_table()
+        else:
+            update_sections_table(self)
+        if hasattr(self, 'update_section_filter_dropdown'):
+            self.update_section_filter_dropdown()
+        else:
+            update_section_filter_dropdown(self)
     if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
         self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
     if self.sections_panel.sections_table:
         self.sections_panel.sections_table.selectRow(len(self.sections_list) - 1)
+    # Only reassign objects once after all changes
     invalidate_section_assignment_cache(self)
     assign_objects_to_sections(self)
 
@@ -399,7 +418,7 @@ def show_section_context_menu(self, section_index: int, global_pos=None):
         menu.exec(cursor_pos)
 
 def edit_section_points(self, section_index: int):
-    """Edit the polylines of a section"""
+    """Edit the polylines of a section with optimized updates"""
     if section_index < 0 or section_index >= len(self.sections_list):
         return
     section = self.sections_list[section_index]
@@ -412,17 +431,22 @@ def edit_section_points(self, section_index: int):
     section.color = dialog.get_color()
     section.polylines = dialog.get_polylines()
     section.invalidate_cache()  # Invalidate bounding box cache
-    # Use debounced updates
-    if hasattr(self, 'update_sections_table'):
-        self.update_sections_table()
+    # Batch UI updates
+    if hasattr(self, 'update_all_data_tables'):
+        self.update_all_data_tables()
     else:
-        update_sections_table(self)
-    if hasattr(self, 'update_section_filter_dropdown'):
-        self.update_section_filter_dropdown()
-    else:
-        update_section_filter_dropdown(self)
+        # Fallback to individual updates
+        if hasattr(self, 'update_sections_table'):
+            self.update_sections_table()
+        else:
+            update_sections_table(self)
+        if hasattr(self, 'update_section_filter_dropdown'):
+            self.update_section_filter_dropdown()
+        else:
+            update_section_filter_dropdown(self)
     if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
         self.viewer_panel.pdf_viewer.set_sections(self.sections_list)
+    # Only reassign objects once after all changes
     invalidate_section_assignment_cache(self)
     assign_objects_to_sections(self)
 
@@ -461,15 +485,18 @@ def paste_section(self):
     copied_section.color = get_next_rainbow_color(color_index)
     copied_section.invalidate_cache()  # Ensure cache is invalidated for new section
     self.sections_list.append(copied_section)
-    # Use debounced updates
-    if hasattr(self, 'update_sections_table'):
-        self.update_sections_table()
+    # Use batched updates
+    if hasattr(self, 'update_all_data_tables'):
+        self.update_all_data_tables()
     else:
-        update_sections_table(self)
-    if hasattr(self, 'update_section_filter_dropdown'):
-        self.update_section_filter_dropdown()
-    else:
-        update_section_filter_dropdown(self)
+        if hasattr(self, 'update_sections_table'):
+            self.update_sections_table()
+        else:
+            update_sections_table(self)
+        if hasattr(self, 'update_section_filter_dropdown'):
+            self.update_section_filter_dropdown()
+        else:
+            update_section_filter_dropdown(self)
     
     # Update the PDF viewer
     if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
@@ -518,15 +545,18 @@ def delete_section_from_context(self, section_index: int):
     
     if reply == QMessageBox.StandardButton.Yes:
         del self.sections_list[section_index]
-        # Use debounced updates
-        if hasattr(self, 'update_sections_table'):
-            self.update_sections_table()
+        # Use batched updates
+        if hasattr(self, 'update_all_data_tables'):
+            self.update_all_data_tables()
         else:
-            update_sections_table(self)
-        if hasattr(self, 'update_section_filter_dropdown'):
-            self.update_section_filter_dropdown()
-        else:
-            update_section_filter_dropdown(self)
+            if hasattr(self, 'update_sections_table'):
+                self.update_sections_table()
+            else:
+                update_sections_table(self)
+            if hasattr(self, 'update_section_filter_dropdown'):
+                self.update_section_filter_dropdown()
+            else:
+                update_section_filter_dropdown(self)
         
         # Update the PDF viewer
         if hasattr(self, 'viewer_panel') and self.viewer_panel.pdf_viewer:
@@ -534,6 +564,15 @@ def delete_section_from_context(self, section_index: int):
 
 def get_section_for_bbox_optimized(bbox, sections_list, section_bbox_cache: Optional[Dict[str, Optional[Tuple[float, float, float, float]]]] = None):
     """Optimized version that uses bounding box checks before expensive intersection tests."""
+    # Use spatial indexing for large datasets (more than 10 sections)
+    if len(sections_list) > 10:
+        try:
+            from utils.spatial_index import get_section_for_bbox_spatial
+            return get_section_for_bbox_spatial(bbox, sections_list)
+        except ImportError:
+            # Fallback to original method if spatial indexing is not available
+            pass
+    
     x1, y1, x2, y2 = bbox
     
     # Use provided cache or calculate on demand
@@ -565,8 +604,9 @@ def get_section_for_bbox(bbox, sections_list):
     """Return the name of the most recently added section whose any polyline crosses the bbox, or 'Unassigned'."""
     return get_section_for_bbox_optimized(bbox, sections_list)
 
+@monitor_performance("assign_objects_to_sections")
 def assign_objects_to_sections(self):
-    """Optimized version that uses caching and spatial indexing to reduce complexity."""
+    """Optimized version that uses intelligent caching and prevents redundant operations."""
     if not hasattr(self, 'detections') or not hasattr(self, 'sections_list'):
         return
     
@@ -575,15 +615,23 @@ def assign_objects_to_sections(self):
         self._section_assignment_cache = {}
         self._last_sections_hash = None
         self._last_detections_hash = None
+        self._last_assignment_time = 0
     
     # Calculate hash of current state for cache validation
-    sections_hash = hash(tuple((s.name, len(s.polylines)) for s in self.sections_list))
-    detections_hash = hash(tuple((d.bbox, getattr(d, 'page_num', 0)) for d in self.detections))
+    sections_hash = hash(tuple((s.name, len(s.polylines), s.color.rgb() if s.color else 0) for s in self.sections_list))
+    detections_hash = hash(tuple((d.bbox, getattr(d, 'page_num', 0), getattr(d, 'name', '')) for d in self.detections))
     
-    # Check if cache is still valid
-    if (self._last_sections_hash == sections_hash and 
+    # Check if cache is still valid and recent
+    import time
+    current_time = time.time()
+    cache_is_valid = (
+        self._last_sections_hash == sections_hash and 
         self._last_detections_hash == detections_hash and 
-        self._section_assignment_cache):
+        self._section_assignment_cache and
+        current_time - self._last_assignment_time < 0.1  # Cache valid for 100ms
+    )
+    
+    if cache_is_valid:
         # Cache is valid, apply cached assignments
         for det in self.detections:
             cache_key = (det.bbox, getattr(det, 'page_num', 0))
@@ -596,10 +644,19 @@ def assign_objects_to_sections(self):
     # Cache is invalid, recalculate everything
     self._section_assignment_cache.clear()
     
-    # Pre-calculate section bounding boxes
-    section_bbox_cache = {}
-    for section in self.sections_list:
-        section_bbox_cache[section.name] = section.get_bounding_box()
+    # Invalidate spatial cache if sections changed
+    try:
+        from utils.spatial_index import invalidate_spatial_cache
+        invalidate_spatial_cache()
+    except ImportError:
+        pass
+    
+    # Pre-calculate section bounding boxes (only for small datasets)
+    section_bbox_cache = None
+    if len(self.sections_list) <= 10:
+        section_bbox_cache = {}
+        for section in self.sections_list:
+            section_bbox_cache[section.name] = section.get_bounding_box()
     
     # Create section name to color mapping
     section_colors = {section.name: section.color for section in self.sections_list}
@@ -620,6 +677,7 @@ def assign_objects_to_sections(self):
     # Update cache state
     self._last_sections_hash = sections_hash
     self._last_detections_hash = detections_hash
+    self._last_assignment_time = current_time
 
 def invalidate_section_assignment_cache(self):
     """Invalidate the section assignment cache when sections change."""
@@ -627,6 +685,13 @@ def invalidate_section_assignment_cache(self):
         self._section_assignment_cache.clear()
         self._last_sections_hash = None
         self._last_detections_hash = None
+    
+    # Also invalidate spatial cache
+    try:
+        from utils.spatial_index import invalidate_spatial_cache
+        invalidate_spatial_cache()
+    except ImportError:
+        pass
 
 def polyline_intersects_bbox(points, bbox):
     """Return True if any segment of the polyline intersects the bbox."""

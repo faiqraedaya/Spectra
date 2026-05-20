@@ -1,7 +1,7 @@
 from typing import List
 
 from PySide6.QtWidgets import QInputDialog, QMessageBox
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt
 
 from detection.categories_map import get_category
 from detection.roboflow import RoboflowAnalysisThread
@@ -14,8 +14,6 @@ class AnalysisManager:
     def __init__(self, main_window):
         self.main_window = main_window
         self.analysis_thread = None
-        self._pending_detections = None
-        self._pending_error = None
         
     def run_analysis(self):
         """Analyze all pages of the PDF"""
@@ -65,19 +63,7 @@ class AnalysisManager:
             self.main_window.progress_bar.setValue(current)
 
     def on_analysis_complete(self, detections: List):
-        """Handle analysis completion - thread-safe method"""
-        # Store detections and schedule UI update on main thread
-        self._pending_detections = detections
-        QTimer.singleShot(0, self._handle_analysis_complete)
-
-    def _handle_analysis_complete(self):
-        """Internal method to handle analysis completion on main thread"""
-        if self._pending_detections is None:
-            return
-            
-        detections = self._pending_detections
-        self._pending_detections = None
-        
+        """Handle analysis completion - thread-safe method using Qt signal/slot mechanism"""
         # Preserve manual detections
         manual_detections = [
             d for d in self.main_window.detections if getattr(d, "source", "model") == "manual"
@@ -93,11 +79,13 @@ class AnalysisManager:
         self.main_window.undo_stack.clear()
         self.main_window.redo_stack.clear()
         
-        # Update UI components on main thread
+        # Update UI components on main thread with immediate updates
         if hasattr(self.main_window, 'pdf_viewer') and self.main_window.pdf_viewer:
-            self.main_window.pdf_viewer.set_detections(self.main_window.detections)
+            self.main_window.pdf_viewer.set_detections(self.main_window.detection_manager.get_filtered_detections())
         
-        if hasattr(self.main_window, 'update_objects_table'):
+        if hasattr(self.main_window, 'update_objects_table_immediate'):
+            self.main_window.update_objects_table_immediate()
+        elif hasattr(self.main_window, 'update_objects_table'):
             self.main_window.update_objects_table()
 
         # Update UI
@@ -111,19 +99,7 @@ class AnalysisManager:
         )
 
     def on_analysis_error(self, error_message: str):
-        """Handle analysis error - thread-safe method"""
-        # Store error and schedule UI update on main thread
-        self._pending_error = error_message
-        QTimer.singleShot(0, self._handle_analysis_error)
-
-    def _handle_analysis_error(self):
-        """Internal method to handle analysis error on main thread"""
-        if self._pending_error is None:
-            return
-            
-        error_message = self._pending_error
-        self._pending_error = None
-        
+        """Handle analysis error - thread-safe method using Qt signal/slot mechanism"""
         QMessageBox.critical(
             self.main_window, "Analysis Error", f"Error during analysis:\n{error_message}"
         )
@@ -177,6 +153,4 @@ class AnalysisManager:
             if self.analysis_thread.isRunning():
                 self.analysis_thread.terminate()
                 self.analysis_thread.wait()
-        self.analysis_thread = None
-        self._pending_detections = None
-        self._pending_error = None 
+        self.analysis_thread = None 

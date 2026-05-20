@@ -23,15 +23,18 @@ class ResultsPanel:
         
     def create_panel(self):
         """Create the results panel with filter and table"""
+        # Create results panel
         results_widget = QWidget()
         results_layout = QVBoxLayout()
         results_widget.setLayout(results_layout)
         
-        # Add section filter to results
+        # Create results filter layout
         results_filter_layout = QHBoxLayout()
+        # Create results filter label
         results_filter_label = QLabel("Filter by Section:")
         results_filter_layout.addWidget(results_filter_label)
         
+        # Create results section filter dropdown and connect it to update results table
         self.results_section_filter_dropdown = QComboBox()
         self.results_section_filter_dropdown.addItem("All")
         self.results_section_filter_dropdown.currentIndexChanged.connect(
@@ -39,6 +42,7 @@ class ResultsPanel:
         )
         results_filter_layout.addWidget(self.results_section_filter_dropdown)
         
+        # Create results table with 7 columns: Section, Tiny, Small, Medium, Large, FBR, Total
         self.results_table = QTableWidget()
         from config.settings import RESULTS_TABLE_COLUMNS
         self.results_table.setColumnCount(len(RESULTS_TABLE_COLUMNS))
@@ -47,23 +51,27 @@ class ResultsPanel:
         results_layout.addLayout(results_filter_layout)
         results_layout.addWidget(self.results_table)
         
+        # Create export results button and connect it to export results to csv
         self.export_results_button = QPushButton("Export to CSV")
         self.export_results_button.clicked.connect(self.main_window.export_results_to_csv)
         results_layout.addWidget(self.export_results_button)
 
+        # Return results panel
         return results_widget
 
     def update_results_table(self):
         """Update the Results tab with frequency calculations for all sections."""
-        if not self.results_table:
+        if not self.results_table: # Check if results table exists
             return
-            
+        
+        # Get section filter
         section_filter = (
             self.results_section_filter_dropdown.currentText()
             if self.results_section_filter_dropdown
             else "All"
         )
         
+        # Calculate section frequencies
         results = calculate_section_frequencies(
             self.main_window.sections_list, 
             self.main_window.detections, 
@@ -74,9 +82,12 @@ class ResultsPanel:
         if section_filter != "All":
             results = [row for row in results if str(row["section"]) == section_filter]
             
+        # Set row count to number of results
         self.results_table.setRowCount(len(results))
         
+        # Iterate through results
         for i, row in enumerate(results):
+            # Set table values
             self.results_table.setItem(i, 0, QTableWidgetItem(str(row["section"])))
             self.results_table.setItem(i, 1, QTableWidgetItem(f"{row['tiny']:.2e}"))
             self.results_table.setItem(i, 2, QTableWidgetItem(f"{row['small']:.2e}"))
@@ -85,22 +96,28 @@ class ResultsPanel:
             self.results_table.setItem(i, 5, QTableWidgetItem(f"{row['fbr']:.2e}"))
             self.results_table.setItem(i, 6, QTableWidgetItem(f"{row['total']:.2e}"))
             
+        # Resize columns to contents
         self.results_table.resizeColumnsToContents()
 
     def update_results_section_filter_dropdown(self):
-        """Update the results section filter dropdown"""
-        if not self.results_section_filter_dropdown:
+        """Update the results section filter dropdown with current sections"""
+        if not self.results_section_filter_dropdown: # Check if results section filter dropdown exists
             return
             
+        # Get current section filter
         current = self.results_section_filter_dropdown.currentText()
+        
+        # Block signals and clear results section filter dropdown
         self.results_section_filter_dropdown.blockSignals(True)
         self.results_section_filter_dropdown.clear()
         self.results_section_filter_dropdown.addItem("All")
         
+        # Add section names to results section filter dropdown
         section_names = [section.name for section in self.main_window.sections_list]
         for section_name in section_names:
             self.results_section_filter_dropdown.addItem(section_name)
             
+        # Set current section filter
         self.results_section_filter_dropdown.setCurrentText(
             current if current in ["All"] + section_names else "All"
         )

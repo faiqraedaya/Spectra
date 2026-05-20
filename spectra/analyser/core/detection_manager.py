@@ -18,13 +18,28 @@ class DetectionManager:
         
     def get_filtered_detections(self) -> List[Detection]:
         """Get detections filtered by current section and category filters"""
-        if not hasattr(self.main_window, "section_filter_dropdown") or not hasattr(
-            self.main_window, "category_filter_dropdown"
-        ):
+        # Safely get filter dropdowns with fallback
+        section_filter = None
+        category_filter = None
+        
+        try:
+            # Try to get filter dropdowns through properties
+            if hasattr(self.main_window, 'section_filter_dropdown'):
+                section_filter = self.main_window.section_filter_dropdown
+            if hasattr(self.main_window, 'category_filter_dropdown'):
+                category_filter = self.main_window.category_filter_dropdown
+        except (AttributeError, RuntimeError):
+            # If properties fail, try direct access to panel
+            if hasattr(self.main_window, 'objects_panel'):
+                section_filter = getattr(self.main_window.objects_panel, 'section_filter_dropdown', None)
+                category_filter = getattr(self.main_window.objects_panel, 'category_filter_dropdown', None)
+        
+        # If filters are not available, return all detections
+        if section_filter is None or category_filter is None:
             return self.main_window.detections
             
-        section = self.main_window.section_filter_dropdown.currentText()
-        category = self.main_window.category_filter_dropdown.currentText()
+        section = section_filter.currentText()
+        category = category_filter.currentText()
         filtered = self.main_window.detections
         
         if section != "All":
@@ -42,7 +57,7 @@ class DetectionManager:
             self.clipboard_detection = self.main_window.detections[idx]
             self.clipboard_cut = True
             self.main_window.detections.pop(idx)
-            self.main_window.update_objects_table()
+            self.main_window.update_objects_table_immediate()
             self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
 
     def copy_detection(self, idx: int):
@@ -79,14 +94,15 @@ class DetectionManager:
             self._assign_detection_to_section(new_det)
             # Robust: reassign all objects after any change
             assign_objects_to_sections(self.main_window)
-            self.main_window.update_objects_table()
+            
+            # Update UI with immediate updates to ensure visibility
+            self.main_window.update_objects_table_immediate()
             self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
+            self.main_window.update_results_table_immediate()
             
             if self.clipboard_cut:
                 self.clipboard_detection = None
                 self.clipboard_cut = False
-                
-            self.main_window.update_results_table()
 
     def delete_detection(self, idx: int):
         """Delete a detection"""
@@ -105,9 +121,9 @@ class DetectionManager:
             if reply == QMessageBox.StandardButton.Yes:
                 self.main_window.detections.pop(idx)
                 invalidate_section_assignment_cache(self.main_window)
-                self.main_window.update_objects_table()
+                self.main_window.update_objects_table_immediate()
                 self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
-                self.main_window.update_results_table()
+                self.main_window.update_results_table_immediate()
 
     def edit_detection(self, idx: int):
         """Edit a detection's properties"""
@@ -129,9 +145,11 @@ class DetectionManager:
                 # Invalidate cache since detection properties changed
                 invalidate_section_assignment_cache(self.main_window)
                 assign_objects_to_sections(self.main_window)
-                self.main_window.update_objects_table()
+                
+                # Update UI with immediate updates to ensure visibility
+                self.main_window.update_objects_table_immediate()
                 self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
-                self.main_window.update_results_table()
+                self.main_window.update_results_table_immediate()
 
     def add_manual_detection(self, bbox):
         from ui.dialogs.detection_dialog import DetectionDialog
@@ -161,11 +179,17 @@ class DetectionManager:
             self.main_window.undo_stack.append(self.main_window.detections.copy())
             self.main_window.redo_stack.clear()
             self.main_window.detections.append(new_detection)
-            invalidate_section_assignment_cache(self.main_window)
+            
+            # First, assign objects to sections to ensure proper section assignment
             assign_objects_to_sections(self.main_window)
-            self.main_window.update_objects_table()
-            self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
-            self.main_window.update_results_table()
+            
+            # Then update UI components with immediate updates to ensure visibility
+            self.main_window.update_objects_table_immediate()
+            self.main_window.update_results_table_immediate()
+            
+            # Update viewer with filtered detections
+            if hasattr(self.main_window, 'pdf_viewer') and self.main_window.pdf_viewer:
+                self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
 
     def _handle_new_section(self, section_name: str, line_size: Optional[float]):
         """Handle creation of new sections when editing detections"""
@@ -210,8 +234,8 @@ class DetectionManager:
             return
         self.main_window.redo_stack.append(self.main_window.detections.copy())
         self.main_window.detections = self.main_window.undo_stack.pop()
-        self.main_window.pdf_viewer.set_detections(self.main_window.detections)
-        self.main_window.update_objects_table()
+        self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
+        self.main_window.update_objects_table_immediate()
 
     def redo(self):
         """Redo the last undone annotation change"""
@@ -219,8 +243,8 @@ class DetectionManager:
             return
         self.main_window.undo_stack.append(self.main_window.detections.copy())
         self.main_window.detections = self.main_window.redo_stack.pop()
-        self.main_window.pdf_viewer.set_detections(self.main_window.detections)
-        self.main_window.update_objects_table()
+        self.main_window.pdf_viewer.set_detections(self.get_filtered_detections())
+        self.main_window.update_objects_table_immediate()
 
     def on_bbox_changed(self, idx: int, bbox):
         """Handle bounding box changes from drag/resize"""
@@ -228,7 +252,7 @@ class DetectionManager:
             self.main_window.detections[idx].bbox = bbox
         from sections.sections import assign_objects_to_sections
         assign_objects_to_sections(self.main_window)
-        self.main_window.update_objects_table()
+        self.main_window.update_objects_table_immediate()
 
     def on_bbox_right_clicked(self, bbox_index: int, global_pos=None):
         """Handle right-click on bounding box"""

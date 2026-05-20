@@ -84,11 +84,19 @@ def calculate_section_frequencies(sections, detections, freq_table: FrequencyTab
             line_size = d.line_size if getattr(d, 'line_size', None) is not None else section.line_size
             count = getattr(d, 'count', 1)
             
-            row = freq_table.lookup(category, line_size)
+            # Skip if we cannot resolve a valid category or line size
+            if category is None or line_size is None:
+                continue
+
+            row = freq_table.lookup(category, float(line_size))
+            # If no matching row in the frequency table, skip this detection safely
+            if row is None:
+                continue
             
             for col in HOLE_SIZE_COLS:
                 try:
-                    freq_sums[col] += float(row[col]) * count
+                    value = row.get(col, 0)
+                    freq_sums[col] += float(value) * count
                 except Exception as e:
                     raise ValueError(f"Error adding frequency: {e}")
             

@@ -3,6 +3,9 @@ import io
 import os
 import shutil
 import tempfile
+import psutil
+import gc
+import time
 from typing import List, Optional, Tuple, cast
 
 from PIL import Image
@@ -20,8 +23,18 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QLabel, QMenu, QMessageBox
 import fitz
 
+# Import performance monitoring
+try:
+    from utils.performance_monitor import monitor_performance
+except ImportError:
+    # Fallback decorator if performance monitoring is not available
+    def monitor_performance(operation: str):
+        def decorator(func):
+            return func
+        return decorator
+
 class PDFViewer(QLabel):
-    """PDF Viewer with zoom and pan"""
+    """PDF Viewer with zoom and pan - Optimized for performance and memory usage"""
     # UI Signals
     zoom_changed = Signal(float) # zoom factor
     bbox_right_clicked = Signal(int)  # index of detection in self.detections
@@ -30,42 +43,64 @@ class PDFViewer(QLabel):
     background_right_clicked = Signal(QPoint)  # position of right click on background
     bbox_edit_finished = Signal(int)  # index of detection finished editing
     section_drawn = Signal(list)  # list of (x, y) points for new section
-    section_right_clicked = Signal(int, object)  # index of section, global position
+    section_right_clicked = Signal(int, object)
 
     def __init__(self):
         super().__init__()
         self.setMinimumSize(800, 600)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setText("No PDF loaded")
-
-        # PDF handling
+        
+        # PDF document and page management
         self.pdf_document = None
         self.current_page = 0
         self.total_pages = 0
         self.temp_dir = None
         
-        # Page caching to prevent unnecessary re-rendering
-        self._page_cache = {}  # page_num -> (pixmap, temp_path)
-        self._page_cache_rendered = set()  # Set of page numbers that have been rendered
-        
-        # Display properties
+        # Image and display management
+        self.original_pixmap: Optional[QPixmap] = None
+        self.scaled_pixmap: Optional[QPixmap] = None
+        self.last_zoom_factor = 1.0
+        self.last_zoom_size = None
         self.zoom_factor = 1.0
+        self.zoom_step = 0.25
         self.min_zoom = 0.1
-        self.max_zoom = 10.0
-        self.zoom_step = 0.2
+        self.max_zoom = 5.0
         self.image_offset = [0, 0]
         
-        # Pixmaps
-        self.original_pixmap = None
-        self.scaled_pixmap = None
+        # Enhanced page caching with memory pressure awareness
+        self._page_cache = {}
+        self._page_cache_rendered = set()
+        self._max_cache_size = 5  # Base cache size
+        self._memory_pressure_threshold = 0.8  # 80% memory usage triggers cache reduction
+        self._cache_access_times = {}  # Track when pages were last accessed
+        self._lazy_load_enabled = True
+        self._preload_distance = 2  # Preload pages within this distance of current page
         
-        # Detection data
+        # Detection and selection management
         self.detections = []
+        self.selected_bbox_index = None
+        self.dragging = False
+        self.drag_offset = None
+        self.drag_start_bbox = None
+        self.resizing = False
+        self.resize_handle = None
+        self.resize_start_bbox = None
+        self.resize_start_pos = None
+        self.handle_size = 8
         
-        # Section data
+        # Section management
         self.sections = []
         self.section_points = []
-        
+        self.selected_section_index = None
+        self.selected_polyline_index = None
+        self._polyline_clipboard = None
+        self._polyline_dragging = False
+        self._polyline_drag_start_pos = None
+        self._polyline_drag_start_points = None
+        self._polyline_point_drag_idx = None
+        self.debug_mode = True  # Set to True to show detection areas
+
         # Pan properties
         self.pan_start_pos = None
         self.is_panning = False
@@ -79,32 +114,28 @@ class PDFViewer(QLabel):
         # Section drawing mode
         self.add_section_mode = False
         self.drawing_section = False
-        
-        # Drag/resize bbox state
-        self.selected_bbox_index = None
-        self.dragging = False
-        self.resizing = False
-        self.resize_handle = None
-        self.drag_offset = None
-        self.resize_start_bbox = None
-        self.resize_start_pos = None
-        self.handle_size = 8
-        
-        # Polyline selection state
-        self.selected_section_index = None
-        self.selected_polyline_index = None
-        self._polyline_clipboard = None
-        self._polyline_dragging = False
-        self._polyline_drag_start_pos = None
-        self._polyline_drag_start_points = None
-        self._polyline_point_drag_idx = None
-        self.debug_mode = True  # Set to True to show detection areas
 
-        # Display update batching
+        # Display update batching with improved timing
         self._display_update_pending = False
         self._display_update_timer = QTimer()
         self._display_update_timer.setSingleShot(True)
         self._display_update_timer.timeout.connect(self._perform_display_update)
+        
+        # Pixmap scaling optimization
+        self._scaled_pixmap_cache = {}  # Cache scaled pixmaps by size
+        self._max_scaled_cache_size = 3  # Keep only 3 scaled versions
+        self._last_detection_hash = None  # Track if detections changed
+        self._scaled_with_detections_pixmap: Optional[QPixmap] = None  # Cache of scaled pixmap with detections drawn
+        
+        # Lazy loading timer
+        self._lazy_load_timer = QTimer()
+        self._lazy_load_timer.setSingleShot(True)
+        self._lazy_load_timer.timeout.connect(self._preload_adjacent_pages)
+        
+        # Memory monitoring timer
+        self._memory_monitor_timer = QTimer()
+        self._memory_monitor_timer.timeout.connect(self._check_memory_pressure)
+        self._memory_monitor_timer.start(5000)  # Check every 5 seconds
         
         # Enable mouse tracking for pan
         self.setMouseTracking(True)
@@ -113,20 +144,120 @@ class PDFViewer(QLabel):
         """Destructor to ensure cleanup is called when object is destroyed"""
         try:
             self.cleanup()
-        except:
+        except Exception:
             # Ignore errors during destruction
             pass
 
-    def load_pdf(self, pdf_path: str) -> bool:
-        """Load PDF and convert pages to images"""
+    def _clear_pixmap(self, pixmap: Optional[QPixmap]) -> None:
+        """Safely clear a QPixmap to free memory"""
+        if pixmap is not None:
+            try:
+                # In PySide6, we can't detach QPixmap, but we can clear it
+                # The garbage collector will handle the memory cleanup
+                del pixmap
+            except Exception:
+                pass
+
+    def _get_memory_usage(self) -> float:
+        """Get current memory usage as a percentage"""
         try:
-            # Clean up previous temp directory and cache
-            if self.temp_dir and os.path.exists(self.temp_dir):
-                shutil.rmtree(self.temp_dir)
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            memory_percent = process.memory_percent()
+            return memory_percent / 100.0  # Convert to 0-1 range
+        except Exception:
+            # Fallback to a conservative estimate
+            return 0.5
+
+    def _check_memory_pressure(self):
+        """Check memory pressure and adjust cache size accordingly"""
+        memory_usage = self._get_memory_usage()
+        
+        if memory_usage > self._memory_pressure_threshold:
+            # Reduce cache size under memory pressure
+            target_cache_size = max(2, int(self._max_cache_size * 0.5))
+            self._reduce_cache_size(target_cache_size)
             
-            # Clear page cache
-            self._page_cache.clear()
-            self._page_cache_rendered.clear()
+            # Force garbage collection
+            gc.collect()
+        elif memory_usage < self._memory_pressure_threshold * 0.7:
+            # Restore cache size when memory pressure is low
+            self._max_cache_size = 5
+
+    def _reduce_cache_size(self, target_size: int):
+        """Reduce cache size by removing least recently used pages"""
+        if len(self._page_cache) <= target_size:
+            return
+            
+        # Sort pages by access time (oldest first)
+        sorted_pages = sorted(
+            self._page_cache.keys(),
+            key=lambda p: self._cache_access_times.get(p, 0)
+        )
+        
+        # Remove oldest pages (excluding current page)
+        pages_to_remove = []
+        for page_num in sorted_pages:
+            if page_num != self.current_page and len(self._page_cache) - len(pages_to_remove) > target_size:
+                pages_to_remove.append(page_num)
+        
+        # Remove pages from cache
+        for page_num in pages_to_remove:
+            if page_num in self._page_cache:
+                pixmap, temp_path = self._page_cache[page_num]
+                # Clear pixmap memory
+                self._clear_pixmap(pixmap)
+                # Remove temp file if it exists
+                try:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                except Exception:
+                    pass
+                del self._page_cache[page_num]
+                self._page_cache_rendered.discard(page_num)
+                self._cache_access_times.pop(page_num, None)
+
+    def _manage_cache_size(self):
+        """Manage page cache size with memory pressure awareness"""
+        # Check memory pressure first
+        memory_usage = self._get_memory_usage()
+        effective_cache_size = self._max_cache_size
+        
+        if memory_usage > self._memory_pressure_threshold:
+            effective_cache_size = max(2, int(self._max_cache_size * 0.5))
+        
+        if len(self._page_cache) <= effective_cache_size:
+            return
+            
+        self._reduce_cache_size(effective_cache_size)
+
+    def _calculate_optimal_scale_factor(self, zoom_factor: float) -> float:
+        """Calculate optimal scale factor for PDF rendering based on zoom level"""
+        # Base scale factor for quality
+        base_scale = 1.0
+        
+        # Adjust scale based on zoom level to balance quality and performance
+        if zoom_factor <= 0.5:
+            # For very small zoom, use lower resolution
+            scale_factor = 0.75
+        elif zoom_factor <= 1.0:
+            # For normal zoom, use standard resolution
+            scale_factor = 1.0
+        elif zoom_factor <= 2.0:
+            # For medium zoom, use higher resolution
+            scale_factor = 1.5
+        else:
+            # For high zoom, use maximum resolution
+            scale_factor = 2.0
+        
+        return scale_factor
+
+    @monitor_performance("load_pdf")
+    def load_pdf(self, pdf_path: str) -> bool:
+        """Load PDF and convert pages to images with lazy loading"""
+        try:
+            # Clean up previous resources
+            self._cleanup_resources()
 
             # Create new temp directory
             self.temp_dir = tempfile.mkdtemp()
@@ -136,45 +267,49 @@ class PDFViewer(QLabel):
             self.total_pages = len(self.pdf_document)
             self.current_page = 0
 
-            # Convert first page
+            # Convert first page only (lazy loading for others)
             self.render_current_page()
+            
+            # Schedule preloading of adjacent pages
+            if self._lazy_load_enabled:
+                self._lazy_load_timer.start(100)  # Start preloading after 100ms
+                
             return True
         except Exception as e:
+            # Ensure cleanup on error
+            self._cleanup_resources()
             QMessageBox.critical(None, "PDF Load Error", f"Failed to load PDF: {str(e)}")
             return False
-    
-    def render_current_page(self):
-        """Render current PDF page to image with caching"""
-        if not self.pdf_document or self.current_page >= self.total_pages:
-            return
-        if self.temp_dir is None:
+
+    def _preload_adjacent_pages(self):
+        """Preload pages adjacent to the current page for smooth navigation"""
+        if not self.pdf_document or not self._lazy_load_enabled:
             return
             
-        # Check if page is already cached
-        if self.current_page in self._page_cache:
-            pixmap, temp_path = self._page_cache[self.current_page]
-            self.original_pixmap = pixmap
-            self.update_display()
-            return
-            
-        # Render page using helper method
-        result = self._render_page_to_cache(self.current_page)
-        if result:
-            pixmap, temp_path = result
-            self.original_pixmap = pixmap
-            self.update_display()
-    
-    def _render_page_to_cache(self, page_num: int) -> Optional[Tuple[QPixmap, str]]:
-        """Render a specific page and cache it. Returns (pixmap, temp_path) or None on error."""
+        # Preload pages within preload distance
+        for offset in range(-self._preload_distance, self._preload_distance + 1):
+            page_num = self.current_page + offset
+            if (0 <= page_num < self.total_pages and 
+                page_num not in self._page_cache and 
+                len(self._page_cache) < self._max_cache_size):
+                
+                # Use lower priority rendering for preloaded pages
+                self._render_page_to_cache_low_priority(page_num)
+
+    def _render_page_to_cache_low_priority(self, page_num: int):
+        """Render a page with lower quality for preloading"""
         if not self.pdf_document or page_num >= self.total_pages or self.temp_dir is None:
             return None
             
         try:
+            # Manage cache size before adding new page
+            self._manage_cache_size()
+            
             # Get page
             page = self.pdf_document[page_num]
             
-            # Render at high DPI for quality
-            mat = fitz.Matrix(2.0, 2.0)  # 2x scaling for better quality
+            # Use lower resolution for preloaded pages
+            mat = fitz.Matrix(1.0, 1.0)  # 1x scaling for preloaded pages
             pix = page.get_pixmap(matrix=mat)  # type: ignore[attr-defined]
             
             # Convert to PIL Image then to QPixmap
@@ -190,6 +325,136 @@ class PDFViewer(QLabel):
             # Cache the rendered page
             self._page_cache[page_num] = (pixmap, temp_path)
             self._page_cache_rendered.add(page_num)
+            self._cache_access_times[page_num] = 0  # Mark as least recently used
+            
+            return pixmap, temp_path
+            
+        except Exception as e:
+            # Don't show error for preloaded pages
+            return None
+
+    def _cleanup_resources(self):
+        """Clean up resources without resetting all state variables"""
+        # Close and clear PDF document
+        if self.pdf_document:
+            try:
+                self.pdf_document.close()
+            except Exception:
+                pass
+            self.pdf_document = None
+
+        # Remove temporary directory
+        if self.temp_dir and os.path.exists(self.temp_dir):
+            try:
+                shutil.rmtree(self.temp_dir)
+            except Exception:
+                # If rmtree fails, try to remove individual files
+                try:
+                    for root, dirs, files in os.walk(self.temp_dir, topdown=False):
+                        for name in files:
+                            try:
+                                os.remove(os.path.join(root, name))
+                            except Exception:
+                                pass
+                        for name in dirs:
+                            try:
+                                os.rmdir(os.path.join(root, name))
+                            except Exception:
+                                pass
+                    os.rmdir(self.temp_dir)
+                except Exception:
+                    pass
+            self.temp_dir = None
+
+        # Clear page cache and free memory
+        for pixmap, temp_path in self._page_cache.values():
+            self._clear_pixmap(pixmap)
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception:
+                pass
+        self._page_cache.clear()
+        self._page_cache_rendered.clear()
+        self._cache_access_times.clear()
+
+        # Clear pixmaps to free memory
+        self._clear_pixmap(self.original_pixmap)
+        self._clear_pixmap(self.scaled_pixmap)
+        self.original_pixmap = None
+        self.scaled_pixmap = None
+
+    @monitor_performance("render_current_page")
+    def render_current_page(self):
+        """Render current PDF page to image with caching and optimal scaling"""
+        if not self.pdf_document or self.current_page >= self.total_pages:
+            return
+        if self.temp_dir is None:
+            return
+            
+        # Update access time for current page
+        self._cache_access_times[self.current_page] = time.time()
+            
+        # Invalidate composed cache when re-rendering
+        self._scaled_with_detections_pixmap = None
+        # Check if page is already cached
+        if self.current_page in self._page_cache:
+            pixmap, temp_path = self._page_cache[self.current_page]
+            # Clear previous original pixmap before reassignment
+            self._clear_pixmap(self.original_pixmap)
+            self.original_pixmap = pixmap
+            self.update_display()
+            
+            # Schedule preloading of adjacent pages
+            if self._lazy_load_enabled:
+                self._lazy_load_timer.start(50)  # Shorter delay for cached pages
+            return
+            
+        # Render page using helper method
+        result = self._render_page_to_cache(self.current_page)
+        if result:
+            pixmap, temp_path = result
+            # Clear previous original pixmap before reassignment
+            self._clear_pixmap(self.original_pixmap)
+            self.original_pixmap = pixmap
+            self.update_display()
+            
+            # Schedule preloading of adjacent pages
+            if self._lazy_load_enabled:
+                self._lazy_load_timer.start(100)
+    
+    @monitor_performance("render_page_to_cache")
+    def _render_page_to_cache(self, page_num: int) -> Optional[Tuple[QPixmap, str]]:
+        """Render a specific page and cache it with optimal scaling. Returns (pixmap, temp_path) or None on error."""
+        if not self.pdf_document or page_num >= self.total_pages or self.temp_dir is None:
+            return None
+            
+        try:
+            # Manage cache size before adding new page
+            self._manage_cache_size()
+            
+            # Get page
+            page = self.pdf_document[page_num]
+            
+            # Calculate optimal scale factor based on current zoom
+            scale_factor = self._calculate_optimal_scale_factor(self.zoom_factor)
+            mat = fitz.Matrix(scale_factor, scale_factor)
+            pix = page.get_pixmap(matrix=mat)  # type: ignore[attr-defined]
+            
+            # Convert to PIL Image then to QPixmap
+            img_data = pix.tobytes("ppm")
+            pil_image = Image.open(io.BytesIO(img_data))
+            
+            # Convert PIL to QPixmap
+            temp_path = os.path.join(self.temp_dir, f"page_{page_num}.png")
+            pil_image.save(temp_path)
+            
+            pixmap = QPixmap(temp_path)
+            
+            # Cache the rendered page
+            self._page_cache[page_num] = (pixmap, temp_path)
+            self._page_cache_rendered.add(page_num)
+            self._cache_access_times[page_num] = time.time()
             
             return pixmap, temp_path
             
@@ -198,23 +463,27 @@ class PDFViewer(QLabel):
             return None
         
     def set_page(self, page_num: int):
-        """Set current page (0-indexed)"""
+        """Set current page (0-indexed) with lazy loading support"""
         if 0 <= page_num < self.total_pages:
             self.current_page = page_num
             self.image_offset = [0, 0]
             self.render_current_page()
             # Force immediate update for page changes
             self.force_display_update()
-        
+            
+            # Schedule preloading of adjacent pages
+            if self._lazy_load_enabled:
+                self._lazy_load_timer.start(50)
+
     def zoom_in(self):
-        """Zoom in"""
+        """Zoom in with dynamic scaling"""
         if self.zoom_factor < self.max_zoom:
             self.zoom_factor = min(self.zoom_factor + self.zoom_step, self.max_zoom)
             self.update_display()
             self.zoom_changed.emit(self.zoom_factor)
 
     def zoom_out(self):
-        """Zoom out"""
+        """Zoom out with dynamic scaling"""
         if self.zoom_factor > self.min_zoom:
             self.zoom_factor = max(self.zoom_factor - self.zoom_step, self.min_zoom)
             self.update_display()
@@ -228,30 +497,65 @@ class PDFViewer(QLabel):
         self.zoom_changed.emit(self.zoom_factor)
 
     def _perform_display_update(self):
-        """Internal method to perform the actual display update"""
+        """Internal method to perform the actual display update with optimized pixmap scaling"""
         self._display_update_pending = False
         if not self.original_pixmap:
             return
         
-        # Apply zoom - create scaled pixmap only if needed
+        # Calculate target size for scaling
         zoomed_size = self.original_pixmap.size() * self.zoom_factor
         
-        # Reuse existing scaled pixmap if size matches, otherwise create new one
-        if (self.scaled_pixmap is None or 
-            self.scaled_pixmap.size() != zoomed_size):
+        # Check if we need to create a new scaled pixmap
+        needs_new_scaled_pixmap = (
+            self.scaled_pixmap is None or 
+            self.scaled_pixmap.size() != zoomed_size or
+            self.last_zoom_factor != self.zoom_factor
+        )
+        
+        # Check if detections have changed (for drawing optimization)
+        current_detection_hash = hash(tuple((d.bbox, getattr(d, 'page_num', 0)) for d in self.detections))
+        detections_changed = self._last_detection_hash != current_detection_hash
+        
+        # Only create new scaled pixmap if necessary
+        if needs_new_scaled_pixmap:
+            # Clear previous scaled pixmap before creating new one
+            self._clear_pixmap(self.scaled_pixmap)
             self.scaled_pixmap = self.original_pixmap.scaled(
                 zoomed_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
             )
+            self.last_zoom_factor = self.zoom_factor
+            self.last_zoom_size = zoomed_size
+            
+            # Clear detection hash since we need to redraw anyway
+            self._last_detection_hash = None
+            detections_changed = True
         
-        # Create a working copy for drawing detections (don't modify the cached scaled pixmap)
-        working_pixmap = QPixmap(self.scaled_pixmap)
-        
-        # Draw detections if any
-        if self.detections:
-            self.draw_detections(working_pixmap)
-        
-        # Display the working pixmap with offset
-        self.display_with_offset(working_pixmap)
+        # Only redraw detections if they've changed or we have a new scaled pixmap
+        if detections_changed or needs_new_scaled_pixmap:
+            # Create a working copy for drawing detections (don't modify the cached scaled pixmap)
+            if self.scaled_pixmap:
+                working_pixmap = QPixmap(self.scaled_pixmap)
+                
+                # Draw detections if any
+                if self.detections:
+                    self.draw_detections(working_pixmap)
+                
+                # Cache the pixmap with detections for reuse during pan
+                self._scaled_with_detections_pixmap = working_pixmap
+                # Display the working pixmap with offset
+                self.display_with_offset(self._scaled_with_detections_pixmap)
+            else:
+                # Fallback if no scaled pixmap
+                self.display_with_offset(None)
+            
+            # Update detection hash
+            self._last_detection_hash = current_detection_hash
+        else:
+            # Reuse the cached pixmap that already has detections drawn during pan/offset changes
+            if self._scaled_with_detections_pixmap is not None:
+                self.display_with_offset(self._scaled_with_detections_pixmap)
+            else:
+                self.display_with_offset(self.scaled_pixmap)
         
         # Ensure cursor is correct after display update
         if self.add_object_mode:
@@ -317,6 +621,8 @@ class PDFViewer(QLabel):
     def _set_detections_safe(self, detections):
         """Thread-safe internal method to set detections"""
         self.detections = [d for d in detections if d.page_num == self.current_page + 1]
+        # Invalidate cached composed pixmap since detections changed
+        self._scaled_with_detections_pixmap = None
         self.update_display()
 
     def get_handle_positions(self, bbox):
@@ -819,6 +1125,7 @@ class PDFViewer(QLabel):
             self.image_offset[0] += delta.x()
             self.image_offset[1] += delta.y()
             self.pan_start_pos = event.pos()
+            # During pan, reuse composed pixmap for smoothness
             self.update_display()
         else:
             super().mouseMoveEvent(event)
@@ -924,19 +1231,8 @@ class PDFViewer(QLabel):
     
     def cleanup(self):
         """Clean up temporary files and reset all state variables to prevent memory leaks"""
-        # Close and clear PDF document
-        if self.pdf_document:
-            self.pdf_document.close()
-            self.pdf_document = None  # Prevent further access
-
-        # Remove temporary directory
-        if self.temp_dir and os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
-            self.temp_dir = None
-
-        # Clear page cache
-        self._page_cache.clear()
-        self._page_cache_rendered.clear()
+        # Use the improved resource cleanup method
+        self._cleanup_resources()
 
         # Reset PDF handling state
         self.current_page = 0
@@ -945,12 +1241,6 @@ class PDFViewer(QLabel):
         # Reset display properties
         self.zoom_factor = 1.0
         self.image_offset = [0, 0]
-
-        # Clear pixmaps to free memory
-        if self.original_pixmap:
-            self.original_pixmap = None
-        if self.scaled_pixmap:
-            self.scaled_pixmap = None
 
         # Clear all data structures that might hold references
         self.detections.clear()
@@ -1292,11 +1582,13 @@ class PDFViewer(QLabel):
                     
                     for i, pt in enumerate(widget_points):
                         # Draw outer circle for better visibility
+                        x_coord = self.safe_int(pt.x()) if pt.x() is not None else 0
+                        y_coord = self.safe_int(pt.y()) if pt.y() is not None else 0
                         painter.setBrush(QBrush(Qt.GlobalColor.red))
-                        painter.drawEllipse(QPoint(self.safe_int(pt.x()), self.safe_int(pt.y())), handle_size + 4, handle_size + 4)
+                        painter.drawEllipse(QPoint(x_coord, y_coord), handle_size + 4, handle_size + 4)
                         # Draw inner circle
                         painter.setBrush(QBrush(Qt.GlobalColor.yellow))
-                        painter.drawEllipse(QPoint(self.safe_int(pt.x()), self.safe_int(pt.y())), handle_size, handle_size)
+                        painter.drawEllipse(QPoint(x_coord, y_coord), handle_size, handle_size)
                         
                         # Add point index for debugging
                         if getattr(self, 'debug_mode', False):
@@ -1322,7 +1614,9 @@ class PDFViewer(QLabel):
         # Draw points
         painter.setBrush(QBrush(Qt.GlobalColor.green))
         for point in widget_points:
-            painter.drawEllipse(QPoint(self.safe_int(point.x()), self.safe_int(point.y())), 4, 4)
+            x_coord = self.safe_int(point.x()) if point.x() is not None else 0
+            y_coord = self.safe_int(point.y()) if point.y() is not None else 0
+            painter.drawEllipse(QPoint(x_coord, y_coord), 4, 4)
 
     def get_main_window(self):
         # Helper to find the main window for exit_add_object_mode
@@ -1346,7 +1640,7 @@ class PDFViewer(QLabel):
             return
             
         # Create a pixmap the size of the widget
-        display_pixmap = QPixmap(self.size())
+        display_pixmap = QPixmap(max(1, self.width()), max(1, self.height()))
         display_pixmap.fill(Qt.GlobalColor.white)
         painter = QPainter(display_pixmap)
         
@@ -1358,7 +1652,7 @@ class PDFViewer(QLabel):
         painter.end()
         
         self.setPixmap(display_pixmap)
-        self.resize(source_pixmap.size())
+        # Keep the widget size; do not force resize to source image to avoid jumps during pan
 
     def wheelEvent(self, event):
         # Ctrl+Wheel: zoom, Shift+Wheel: pan left/right, else pan up/down
@@ -1378,24 +1672,32 @@ class PDFViewer(QLabel):
             img_x = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
             img_y = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
             
-            # Calculate mouse position relative to image
+            # Calculate mouse position relative to image (in original image coordinates)
             rel_x = (mouse_x - img_x) / self.zoom_factor
             rel_y = (mouse_y - img_y) / self.zoom_factor
-                        
+            
+            # Store old zoom factor
+            old_zoom = self.zoom_factor
+            
             # Perform zoom
             if angle > 0:
-                self.zoom_in()
+                self.zoom_factor = min(self.zoom_factor + self.zoom_step, self.max_zoom)
             else:
-                self.zoom_out()
+                self.zoom_factor = max(self.zoom_factor - self.zoom_step, self.min_zoom)
+            
+            # Calculate the new scaled pixmap size
+            if self.original_pixmap is None:
+                return
+            new_scaled_size = self.original_pixmap.size() * self.zoom_factor
             
             # Calculate new image position to keep mouse point fixed
-            new_zoom = self.zoom_factor
-            new_img_x = (self.width() - self.scaled_pixmap.width()) // 2 + self.image_offset[0]
-            new_img_y = (self.height() - self.scaled_pixmap.height()) // 2 + self.image_offset[1]
+            new_img_x = (self.width() - new_scaled_size.width()) // 2 + self.image_offset[0]
+            new_img_y = (self.height() - new_scaled_size.height()) // 2 + self.image_offset[1]
             
             # Adjust offset to keep the same image point under mouse
-            target_x = mouse_x - rel_x * new_zoom
-            target_y = mouse_y - rel_y * new_zoom
+            # The mouse should stay over the same point in the image
+            target_x = mouse_x - rel_x * self.zoom_factor
+            target_y = mouse_y - rel_y * self.zoom_factor
             
             self.image_offset[0] += int(target_x - new_img_x)
             self.image_offset[1] += int(target_y - new_img_y)
@@ -1500,8 +1802,14 @@ class PDFViewer(QLabel):
         delete_action = menu.addAction("Delete Point")
         action = menu.exec(global_pos)
         if action == delete_action:
-            s_idx = int(self.selected_section_index)
-            p_idx = int(self.selected_polyline_index)
+            try:
+                s_idx = int(self.selected_section_index) if self.selected_section_index is not None else 0
+            except Exception:
+                s_idx = 0
+            try:
+                p_idx = int(self.selected_polyline_index) if self.selected_polyline_index is not None else 0
+            except Exception:
+                p_idx = 0
             section = self.sections[s_idx]
             polyline = section.polylines[p_idx]
             if len(polyline.points) > 2:
@@ -1513,14 +1821,33 @@ class PDFViewer(QLabel):
         add_action = menu.addAction("Add Point")
         action = menu.exec(global_pos)
         if action == add_action:
-            s_idx = int(self.selected_section_index)
-            p_idx = int(self.selected_polyline_index)
+            try:
+                s_idx = int(self.selected_section_index) if self.selected_section_index is not None else 0
+            except Exception:
+                s_idx = 0
+            try:
+                p_idx = int(self.selected_polyline_index) if self.selected_polyline_index is not None else 0
+            except Exception:
+                p_idx = 0
             section = self.sections[s_idx]
             polyline = section.polylines[p_idx]
             # Convert widget coordinates to image coordinates
-            img_x, img_y = self.widget_to_image_coords(pos_xy[0], pos_xy[1])
-            polyline.points.insert(insert_idx, (img_x, img_y))
-            self.update()
+            if pos_xy and len(pos_xy) >= 2 and pos_xy[0] is not None and pos_xy[1] is not None:
+                try:
+                    try:
+                        x_val = int(pos_xy[0])
+                    except Exception:
+                        x_val = 0
+                    try:
+                        y_val = int(pos_xy[1])
+                    except Exception:
+                        y_val = 0
+                    img_x, img_y = self.widget_to_image_coords(x_val, y_val)
+                    polyline.points.insert(insert_idx, (img_x, img_y))
+                    self.update()
+                except (ValueError, TypeError):
+                    # Skip if coordinates are invalid
+                    pass
 
     def toggle_debug_mode(self):
         """Toggle debug mode to show hit areas"""

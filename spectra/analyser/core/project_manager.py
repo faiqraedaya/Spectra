@@ -44,10 +44,10 @@ class ProjectManager:
         self.main_window.redo_stack.clear()
         self.main_window.sections_list.clear()
         
-        # Update UI - these are already debounced in the main window
+        # Update UI with immediate updates to ensure visibility
         self.main_window.update_sections_table()
         self.main_window.update_section_filter_dropdown()
-        self.main_window.update_objects_table()
+        self.main_window.update_objects_table_immediate()
         
         # Reset PDF viewer (cleanup method handles all state reset)
         self.main_window.pdf_viewer.cleanup()
@@ -79,15 +79,15 @@ class ProjectManager:
             self.main_window.overlap = data.get("overlap", 0.3)
             self.main_window.api_key = data.get("api_key", None)
             
-            # Update UI - these are already debounced in the main window
+            # Update UI with immediate updates to ensure visibility
             self.main_window.update_sections_table()
             self.main_window.update_section_filter_dropdown()
-            self.main_window.update_objects_table()
+            self.main_window.update_objects_table_immediate()
             
             # Do not auto-load PDF, just update viewer state
             self.main_window.pdf_viewer.cleanup()
             
-            self.main_window.pdf_viewer.set_detections(self.main_window.detections)
+            self.main_window.pdf_viewer.set_detections(self.main_window.detection_manager.get_filtered_detections())
             self.main_window.pdf_viewer.set_sections(self.main_window.sections_list)
             QMessageBox.information(
                 self.main_window, "Open Project", "Project loaded successfully."
@@ -140,7 +140,7 @@ class ProjectManager:
                 self.main_window.current_pdf_path = file_path
                 self.main_window.update_navigation_controls()
                 self.main_window.detections.clear()
-                self.main_window.update_objects_table()
+                self.main_window.update_objects_table_immediate()
 
     def save_pdf(self):
         """Saves the current PDF with annotations"""
