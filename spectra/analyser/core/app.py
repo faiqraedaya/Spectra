@@ -9,19 +9,30 @@ from config.settings import SPLASH_SCREEN_PATH
 from .main_window import Spectra
 
 def main():
+    """
+    Main application entry point.
+    """
+    # Initialize Qt application
     app = QApplication(sys.argv)
+    
     # Set application icon
     icon_path = os.path.join(os.path.dirname(__file__), '../assets/images/spectra_logo.ico')
     app.setWindowIcon(QIcon(icon_path))
+    
     # Show splash screen
     pixmap = QPixmap(str(SPLASH_SCREEN_PATH))
     splash = QSplashScreen(pixmap)
     splash.show()
     app.processEvents()  # Ensure splash screen is shown
 
+    # Create and display main window
     window = Spectra()
     window.show()
+    
+    # Close splash screen and show main window
     splash.finish(window)
+    
+    # Start application event loop
     sys.exit(app.exec())
 
 if __name__ == "__main__":

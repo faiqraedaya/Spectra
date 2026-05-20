@@ -1,0 +1,124 @@
+{
+  "sections": [
+    {
+      "name": "New Section 1",
+      "line_size": 90.0,
+      "polylines": [
+        {
+          "points": [
+            [
+              470.0,
+              1640.0
+            ],
+            [
+              756.0,
+              1638.0
+            ],
+            [
+              756.0,
+              1352.0
+            ],
+            [
+              2231.0,
+              1354.0
+            ],
+            [
+              2230.0,
+              1928.0
+            ],
+            [
+              3385.454545454545,
+              1929.090909090909
+            ]
+          ],
+          "page": 1
+        },
+        {
+          "points": [
+            [
+              755.0,
+              1646.0
+            ],
+            [
+              757.0,
+              1928.0
+            ],
+            [
+              2223.0,
+              1928.0
+            ]
+          ],
+          "page": 1
+        },
+        {
+          "points": [
+            [
+              3024.5454545454545,
+              1937.272727272727
+            ],
+            [
+              3024.5454545454545,
+              2215.4545454545455
+            ],
+            [
+              3389.090909090909,
+              2215.4545454545455
+            ]
+          ],
+          "page": 1
+        }
+      ],
+      "color": "#f22424"
+    }
+  ],
+  "detections": [
+    {
+      "name": "Flexible Piping",
+      "confidence": 1.0,
+      "bbox": [
+        2178,
+        1644,
+        2284,
+        1785
+      ],
+      "page_num": 1,
+      "section": "New Section 1",
+      "source": "manual",
+      "line_size": 90.0,
+      "count": 1
+    },
+    {
+      "name": "Flexible Piping",
+      "confidence": 1.0,
+      "bbox": [
+        2083,
+        1459,
+        2379,
+        1597
+      ],
+      "page_num": 1,
+      "section": "New Section 1",
+      "source": "manual",
+      "line_size": 90.0,
+      "count": 1
+    },
+    {
+      "name": "Flexible Piping",
+      "confidence": 1.0,
+      "bbox": [
+        2050,
+        1875,
+        2156,
+        2016
+      ],
+      "page_num": 1,
+      "section": "New Section 1",
+      "source": "manual",
+      "line_size": 90.0,
+      "count": 1
+    }
+  ],
+  "confidence": 0.5,
+  "overlap": 0.3,
+  "api_key": "Cs324HR9cmOer068E0dS"
+}

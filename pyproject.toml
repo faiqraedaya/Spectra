@@ -1,0 +1,10 @@
+[project]
+name = "2506p-spectra"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "psutil>=7.2.2",
+    "pymupdf>=1.27.2.3",
+    "pyside6>=6.11.1",
+    "roboflow>=1.3.8",
+]
