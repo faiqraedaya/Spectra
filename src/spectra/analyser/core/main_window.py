@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config.settings import (
+from ..config.settings import (
     APP_TITLE,
     APP_VERSION,
     DEFAULT_CONFIDENCE,
@@ -28,24 +28,24 @@ from config.settings import (
     MAIN_SPLITTER_SIZES,
     ROBOFLOW_API_KEY_ENV,
 )
-from core.analysis_manager import AnalysisManager
-from core.detection_manager import DetectionManager
-from core.project_manager import ProjectManager
-from detection.types import Detection
-from sections.sections import (
+from ..core.analysis_manager import AnalysisManager
+from ..core.detection_manager import DetectionManager
+from ..core.project_manager import ProjectManager
+from ..detection.types import Detection
+from ..sections.sections import (
     Section,
     add_section_with_points,
     import_sections_csv,
     show_section_context_menu,
     update_sections_table,
 )
-from ui.menus import MenuManager
-from ui.panels.objects_panel import ObjectsPanel
-from ui.panels.results_panel import ResultsPanel
-from ui.panels.sections_panel import SectionsPanel
-from ui.panels.viewer_panel import ViewerPanel
-from utils.frequency import FrequencyTable
-from utils.ui_updater import (
+from ..ui.menus import MenuManager
+from ..ui.panels.objects_panel import ObjectsPanel
+from ..ui.panels.results_panel import ResultsPanel
+from ..ui.panels.sections_panel import SectionsPanel
+from ..ui.panels.viewer_panel import ViewerPanel
+from ..utils.frequency import FrequencyTable
+from ..utils.ui_updater import (
     UPDATE_NAVIGATION,
     UPDATE_OBJECTS_TABLE,
     UPDATE_RESULTS_TABLE,

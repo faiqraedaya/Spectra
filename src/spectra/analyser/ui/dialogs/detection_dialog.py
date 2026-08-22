@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from detection.categories_map import get_all_frequency_categories
-from detection.types import Detection
+from ...detection.categories_map import get_all_frequency_categories
+from ...detection.types import Detection
 
 
 class DetectionDialog(QDialog):

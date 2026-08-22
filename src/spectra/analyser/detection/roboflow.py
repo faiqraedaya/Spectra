@@ -3,7 +3,7 @@ from typing import List
 from PySide6.QtCore import QThread, Signal
 from roboflow import Roboflow
 
-from detection.types import Detection
+from ..detection.types import Detection
 
 class RoboflowAnalysisThread(QThread):
     """Thread for running Roboflow analysis without blocking UI

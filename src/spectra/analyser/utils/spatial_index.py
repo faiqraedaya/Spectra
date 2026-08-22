@@ -3,7 +3,7 @@ Spatial indexing utilities for efficient section assignment
 """
 from typing import List, Tuple, Optional, Dict, Any
 import rtree
-from sections.sections import Section, Polyline
+from ..sections.sections import Section, Polyline
 
 
 class SpatialIndex:
@@ -107,7 +107,7 @@ class SpatialIndex:
     def _detailed_intersection_check(self, polylines: List[Polyline], 
                                    bbox: Tuple[float, float, float, float]) -> bool:
         """Perform detailed intersection check between polylines and bbox"""
-        from sections.sections import polyline_intersects_bbox
+        from ..sections.sections import polyline_intersects_bbox
         
         for polyline in polylines:
             if polyline_intersects_bbox(polyline.points, bbox):

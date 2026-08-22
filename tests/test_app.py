@@ -1,7 +1,7 @@
 import pytest
 from PySide6.QtWidgets import QApplication
-from ..core.main_window import Spectra
-from ..config.settings import APP_TITLE
+from spectra.analyser.core.main_window import Spectra
+from spectra.analyser.config.settings import APP_TITLE
 
 @pytest.fixture(scope="session")
 def app():

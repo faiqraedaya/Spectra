@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from detection.categories_map import get_all_frequency_categories
+from ...detection.categories_map import get_all_frequency_categories
 
 
 class ObjectsPanel:

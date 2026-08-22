@@ -1,7 +1,7 @@
 import csv
 from collections import defaultdict
 from typing import List, Dict, Optional
-from detection.categories_map import get_frequency_category
+from ..detection.categories_map import get_frequency_category
 
 # Column names in the frequency table
 HOLE_SIZE_COLS = [

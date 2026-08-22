@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from sections.sections import (
+from ...sections.sections import (
     handle_section_edit,
     move_section_down,
     move_section_up,
