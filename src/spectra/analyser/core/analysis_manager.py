@@ -3,9 +3,9 @@ from typing import List
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 from PySide6.QtCore import Qt
 
-from detection.categories_map import get_category
-from detection.roboflow import RoboflowAnalysisThread
-from sections.sections import assign_objects_to_sections, invalidate_section_assignment_cache
+from ..detection.categories_map import get_category
+from ..detection.roboflow import RoboflowAnalysisThread
+from ..sections.sections import assign_objects_to_sections, invalidate_section_assignment_cache
 
 
 class AnalysisManager:

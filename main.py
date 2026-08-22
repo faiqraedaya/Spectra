@@ -1,9 +1,6 @@
-"""
-Shortcut launcher for Spectra
-"""
-import sys
-import subprocess
+"""Thin entry point for Spectra."""
+
+from spectra.analyser.core.app import main
 
 if __name__ == "__main__":
-    """Launch the analyser app as a module"""
-    subprocess.run([sys.executable, '-m', 'spectra.analyser.main'])
+    main()

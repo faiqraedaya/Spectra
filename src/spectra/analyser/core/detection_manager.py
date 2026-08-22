@@ -5,8 +5,8 @@ from PySide6.QtCore import QPoint
 from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import QMenu
 
-from detection.types import Detection
-from sections.sections import Section, update_sections_table, polyline_intersects_bbox, assign_objects_to_sections, point_in_polygon, get_section_for_bbox, invalidate_section_assignment_cache
+from ..detection.types import Detection
+from ..sections.sections import Section, update_sections_table, polyline_intersects_bbox, assign_objects_to_sections, point_in_polygon, get_section_for_bbox, invalidate_section_assignment_cache
 
 class DetectionManager:
     """Manages detection operations and state"""
@@ -129,7 +129,7 @@ class DetectionManager:
         """Edit a detection's properties"""
         if idx is not None and 0 <= idx < len(self.main_window.detections):
             detection = self.main_window.detections[idx]
-            from ui.dialogs.detection_dialog import DetectionDialog
+            from ..ui.dialogs.detection_dialog import DetectionDialog
             
             dialog = DetectionDialog(self.main_window, detection)
             if dialog.exec():
@@ -152,8 +152,8 @@ class DetectionManager:
                 self.main_window.update_results_table_immediate()
 
     def add_manual_detection(self, bbox):
-        from ui.dialogs.detection_dialog import DetectionDialog
-        from sections.sections import get_section_for_bbox, assign_objects_to_sections
+        from ..ui.dialogs.detection_dialog import DetectionDialog
+        from ..sections.sections import get_section_for_bbox, assign_objects_to_sections
         # Detect section for this bbox using robust logic
         prefill_section = get_section_for_bbox(bbox, self.main_window.sections_list)
         prefill_line_size = None
@@ -215,7 +215,7 @@ class DetectionManager:
 
     def _assign_detection_to_section(self, detection):
         """Assign a detection to the first section whose polyline it touches. Returns True if assigned."""
-        from sections.sections import polyline_intersects_bbox
+        from ..sections.sections import polyline_intersects_bbox
         for section in self.main_window.sections_list:
             for polyline in getattr(section, 'polylines', []):
                 # Optionally, only check polylines on the same page as the detection
@@ -250,7 +250,7 @@ class DetectionManager:
         """Handle bounding box changes from drag/resize"""
         if 0 <= idx < len(self.main_window.detections):
             self.main_window.detections[idx].bbox = bbox
-        from sections.sections import assign_objects_to_sections
+        from ..sections.sections import assign_objects_to_sections
         assign_objects_to_sections(self.main_window)
         self.main_window.update_objects_table_immediate()
 

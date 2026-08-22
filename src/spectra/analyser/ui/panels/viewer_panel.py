@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
-from ui.pdf_viewer import PDFViewer
+from ...ui.pdf_viewer import PDFViewer
 
 
 class ViewerPanel:

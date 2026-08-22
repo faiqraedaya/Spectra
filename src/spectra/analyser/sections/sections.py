@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
 
 # Import performance monitoring
 try:
-    from utils.performance_monitor import monitor_performance
+    from ..utils.performance_monitor import monitor_performance
 except ImportError:
     # Fallback decorator if performance monitoring is not available
     def monitor_performance(operation: str):
@@ -294,7 +294,7 @@ def update_section_filter_dropdown(self):
             self.section_filter_dropdown.addItem(section.name)
 
 def add_section_with_points(self, points):
-    from ui.dialogs.section_dialog import SectionDialog
+    from ..ui.dialogs.section_dialog import SectionDialog
     base_name = "New Section"
     existing_names = [section.name for section in self.sections_list]
     i = 1
@@ -422,7 +422,7 @@ def edit_section_points(self, section_index: int):
     if section_index < 0 or section_index >= len(self.sections_list):
         return
     section = self.sections_list[section_index]
-    from ui.dialogs.section_dialog import SectionDialog
+    from ..ui.dialogs.section_dialog import SectionDialog
     dialog = SectionDialog(self, section.name, section.line_size, section.color, polylines=list(section.polylines))
     if not dialog.exec():
         return  # User cancelled
@@ -567,7 +567,7 @@ def get_section_for_bbox_optimized(bbox, sections_list, section_bbox_cache: Opti
     # Use spatial indexing for large datasets (more than 10 sections)
     if len(sections_list) > 10:
         try:
-            from utils.spatial_index import get_section_for_bbox_spatial
+            from ..utils.spatial_index import get_section_for_bbox_spatial
             return get_section_for_bbox_spatial(bbox, sections_list)
         except ImportError:
             # Fallback to original method if spatial indexing is not available
@@ -646,7 +646,7 @@ def assign_objects_to_sections(self):
     
     # Invalidate spatial cache if sections changed
     try:
-        from utils.spatial_index import invalidate_spatial_cache
+        from ..utils.spatial_index import invalidate_spatial_cache
         invalidate_spatial_cache()
     except ImportError:
         pass
@@ -688,7 +688,7 @@ def invalidate_section_assignment_cache(self):
     
     # Also invalidate spatial cache
     try:
-        from utils.spatial_index import invalidate_spatial_cache
+        from ..utils.spatial_index import invalidate_spatial_cache
         invalidate_spatial_cache()
     except ImportError:
         pass

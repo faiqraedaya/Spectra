@@ -25,7 +25,7 @@ import fitz
 
 # Import performance monitoring
 try:
-    from utils.performance_monitor import monitor_performance
+    from ..utils.performance_monitor import monitor_performance
 except ImportError:
     # Fallback decorator if performance monitoring is not available
     def monitor_performance(operation: str):
@@ -1622,7 +1622,7 @@ class PDFViewer(QLabel):
         # Helper to find the main window for exit_add_object_mode
         parent = self.parent()
         try:
-            from core.main_window import Spectra
+            from ..core.main_window import Spectra
         except ImportError:
             Spectra = None
         while parent is not None:

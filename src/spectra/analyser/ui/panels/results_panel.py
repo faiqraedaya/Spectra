@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from utils.frequency import calculate_section_frequencies
+from ...utils.frequency import calculate_section_frequencies
 
 
 class ResultsPanel:
@@ -44,7 +44,7 @@ class ResultsPanel:
         
         # Create results table with 7 columns: Section, Tiny, Small, Medium, Large, FBR, Total
         self.results_table = QTableWidget()
-        from config.settings import RESULTS_TABLE_COLUMNS
+        from ...config.settings import RESULTS_TABLE_COLUMNS
         self.results_table.setColumnCount(len(RESULTS_TABLE_COLUMNS))
         self.results_table.setHorizontalHeaderLabels(RESULTS_TABLE_COLUMNS)
         
