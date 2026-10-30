@@ -17,7 +17,7 @@ from .library import SymbolLibrary, build_from_items, detect_page as library_det
 from .linesize import LineNumber, find_line_numbers, infer_size
 from .matching import Template, find_matches
 from .pdfdoc import PdfDoc, Word
-from .project import Document, Item, Project, new_id
+from .project import Document, Item, Project, Region, Section, new_id
 from .vectors import PageVectors, snap_box, snap_point
 
 
@@ -159,6 +159,63 @@ class Workspace:
             if progress:
                 progress(n + 1, len(pages))
         return out
+
+    def fill_tags(self, items: list[Item]) -> int:
+        """Set empty item tags from the drawing text. Returns the number set."""
+        from .tags import assign_tags
+
+        by_page: dict[tuple[str, int], list[Item]] = defaultdict(list)
+        for it in items:
+            if not it.tag:
+                by_page[(it.doc, it.page)].append(it)
+        n = 0
+        for (doc_id, page), page_items in by_page.items():
+            taken = {i.tag for i in self.project.page_items(doc_id, page) if i.tag}
+            words = [w for w in self.words(doc_id, page) if w.text not in taken]
+            n += assign_tags(page_items, words, self.project.settings.tag_pattern)
+        return n
+
+    def fill_details(self, items: list[Item]) -> None:
+        """Tags first (they identify isolation valves), then sizes."""
+        self.fill_tags(items)
+        self.fill_sizes(items)
+
+    def propose_sections(self, pages: list[tuple[str, int]], progress=None) -> tuple[list[Section], list[Item], list[Item], int]:
+        """Isolatable sections from pipe connectivity, cut at isolation valves.
+
+        Returns (new sections, items before, items after, boundary valves).
+        Items already assigned to a section explicitly keep it.
+        """
+        from .network import DEFAULT_BOUNDARY_TAGS, is_boundary, propose_sections
+
+        pattern = self.project.settings.boundary_pattern or DEFAULT_BOUNDARY_TAGS
+        counted = {c.key for c in self.project.taxonomy if c.category}
+        palette = ["#2563EB", "#059669", "#D97706", "#7C3AED", "#E11D48", "#0891B2"]
+        start = len(self.project.sections)
+        sections: list[Section] = []
+        before: list[Item] = []
+        after: list[Item] = []
+        n_bounds = 0
+        for n, (doc_id, page) in enumerate(pages):
+            items = self.project.page_items(doc_id, page)
+            n_bounds += sum(is_boundary(i, pattern) for i in items)
+            doc = self.project.document(doc_id)
+            for k, ps in enumerate(propose_sections(self.vectors(doc_id, page), items, pattern, counted)):
+                sec = Section(f"{doc.name.rsplit('.', 1)[0] if doc else 'Sheet'} p{page + 1} S{k + 1}",
+                              colour=palette[(start + len(sections)) % len(palette)], size_mm=ps.size_mm,
+                              notes="Proposed from pipe connectivity; check and rename")
+                sec.regions = [Region(doc_id, page, [(float(x0), float(y0)), (float(x1), float(y1))]) for x0, y0, x1, y1 in ps.strokes]
+                sections.append(sec)
+                for iid in ps.items:
+                    it = self.project.item(iid)
+                    if it is not None and it.section is None:
+                        before.append(it)
+                        new = Item.from_dict(it.to_dict())
+                        new.section = sec.id
+                        after.append(new)
+            if progress:
+                progress(n + 1, len(pages))
+        return sections, before, after, n_bounds
 
     def fill_sizes(self, items: list[Item]) -> int:
         """Set missing item sizes from line numbers. Returns the number filled."""

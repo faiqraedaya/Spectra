@@ -40,7 +40,7 @@ def cmd_import_bluebeam(a) -> None:
     for pdf in a.pdfs:
         doc = ws.add_document(pdf)
         items, report, regions = ws.import_bluebeam(doc.id, a.field, mapping, with_regions=a.regions)
-        ws.fill_sizes(items)
+        ws.fill_details(items)
         ws.project.items += items
         ws.project.sections += regions
         print(f"{doc.name}: {report.summary()}")
@@ -81,7 +81,7 @@ def _detect(ws, library: str | None, model: str | None, pages) -> list:
         found = ws.detect_with_model(OnnxDetector(model), pages, _progress("model"))
         ws.project.items += found
         new += found
-    ws.fill_sizes(new)
+    ws.fill_details(new)
     return new
 
 

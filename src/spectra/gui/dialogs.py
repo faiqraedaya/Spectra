@@ -235,6 +235,12 @@ class SettingsDialog(QDialog):
         form.addRow("Model confidence threshold", self.model_conf)
         form.addRow("", self.auto_size)
         form.addRow("Line number pattern (regex)", self.pattern)
+        self.tag_pattern = QLineEdit(st.tag_pattern)
+        self.tag_pattern.setPlaceholderText("Built-in: ESDV-2001, PT1006, FV-100A, …")
+        self.boundary = QLineEdit(st.boundary_pattern)
+        self.boundary.setPlaceholderText("Built-in: ESDV, SDV, ESV, SSV, XV, EIV, BDV, HIPPS, ZV")
+        form.addRow("Tag pattern (regex)", self.tag_pattern)
+        form.addRow("Isolation valve tags (regex)", self.boundary)
         form.addRow("Sizes without units in labels", self.bare)
         tabs.addTab(page2, "Detection")
         lay.addWidget(_buttons(self, "Apply"))
@@ -266,6 +272,8 @@ class SettingsDialog(QDialog):
         st.auto_size = self.auto_size.isChecked()
         st.line_number_pattern = self.pattern.text().strip()
         st.bare_numbers = self.bare.currentData()
+        st.tag_pattern = self.tag_pattern.text().strip()
+        st.boundary_pattern = self.boundary.text().strip()
 
 
 class DatasetDialog(QDialog):

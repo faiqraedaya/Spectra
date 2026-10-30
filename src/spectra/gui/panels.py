@@ -409,6 +409,7 @@ class ItemsPanel(QWidget):
 
 class SectionsPanel(QWidget):
     draw_requested = Signal(str)  # section id
+    propose_requested = Signal()
 
     def __init__(self, state):
         super().__init__()
@@ -443,6 +444,11 @@ class SectionsPanel(QWidget):
         row.addStretch()
         row.addWidget(self.delete)
         lay.addLayout(row)
+        propose = QPushButton("Propose sections from isolation valves")
+        propose.setToolTip("Trace the pipework and split it at ESDV, SDV, XV and BDV valves (by tag). "
+                           "Proposals are ordinary sections: rename, merge across sheets and check them.")
+        propose.clicked.connect(self.propose_requested)
+        lay.addWidget(propose)
         self._loading = False
         for sig in (state.sections_changed, state.items_changed, state.project_changed):
             sig.connect(self.refresh)

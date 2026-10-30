@@ -105,6 +105,8 @@ class Settings:
     bare_numbers: str = "auto"  # how to read unitless sizes in labels
     line_number_pattern: str = ""  # empty: built-in pattern
     auto_size: bool = True  # fill missing sizes from nearby line numbers
+    tag_pattern: str = ""  # empty: built-in pattern, e.g. ESDV-2001, PT1006
+    boundary_pattern: str = ""  # tags of isolation valves; empty: ESDV, SDV, XV, BDV, ...
     match_min_score: float = 0.9
     match_min_precision: float = 0.9
     model_confidence: float = 0.35

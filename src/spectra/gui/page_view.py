@@ -179,8 +179,9 @@ class ItemGraphic(QGraphicsRectItem):
 
 
 class SectionGraphic(QGraphicsPathItem):
-    def __init__(self, points, closed: bool, colour: str, name: str):
+    def __init__(self, points, closed: bool, colour: str, name: str, show_label: bool = True):
         super().__init__()
+        self.show_label = show_label
         path = QPainterPath(QPointF(*points[0]))
         for p in points[1:]:
             path.lineTo(QPointF(*p))
@@ -206,6 +207,8 @@ class SectionGraphic(QGraphicsPathItem):
 
     def paint(self, painter, option, widget=None) -> None:
         super().paint(painter, option, widget)
+        if not self.show_label:
+            return
         painter.save()
         p = painter.worldTransform().map(self.anchor)
         painter.resetTransform()
@@ -216,6 +219,11 @@ class SectionGraphic(QGraphicsPathItem):
         painter.setPen(self.text_colour)
         painter.drawText(QPointF(p.x() + 6, p.y() - 6), self.name)
         painter.restore()
+
+
+def _region_length(r) -> float:
+    pts = r.points
+    return sum(((pts[k + 1][0] - pts[k][0]) ** 2 + (pts[k + 1][1] - pts[k][1]) ** 2) ** 0.5 for k in range(len(pts) - 1))
 
 
 class PageView(QGraphicsView):
@@ -359,11 +367,13 @@ class PageView(QGraphicsView):
         self._sections.clear()
         st = self.state
         for sec in st.project.sections:
-            for r in sec.regions:
-                if r.doc == st.doc_id and r.page == st.page and len(r.points) >= 2:
-                    g = SectionGraphic(r.points, r.closed, sec.colour, sec.name)
-                    self._sections.append(g)
-                    self.scene().addItem(g)
+            regions = [r for r in sec.regions if r.doc == st.doc_id and r.page == st.page and len(r.points) >= 2]
+            # One label per section on the page, on its longest region.
+            longest = max(regions, key=_region_length, default=None)
+            for r in regions:
+                g = SectionGraphic(r.points, r.closed, sec.colour, sec.name, show_label=r is longest)
+                self._sections.append(g)
+                self.scene().addItem(g)
         self.refresh_items()  # item labels show inherited sizes
 
     def _on_scene_selection(self) -> None:

@@ -253,6 +253,7 @@ class MainWindow(QMainWindow):
         self.items_panel.accept_requested.connect(self.accept_selected)
         self.items_panel.delete_requested.connect(self.delete_selected)
         self.sections_panel.draw_requested.connect(self.draw_section_region)
+        self.sections_panel.propose_requested.connect(self.propose_sections)
         self.results_panel.export_xlsx.connect(self.export_xlsx)
         self.results_panel.export_csv.connect(self.export_csv)
         self.results_panel.navigate.connect(self.navigate_to)
@@ -443,7 +444,7 @@ class MainWindow(QMainWindow):
                     it.status = "proposed"
                     it.meta["reason"] = "matches a marked symbol but was not marked"
             if sizes:
-                st.ws.fill_sizes(items + extra)
+                st.ws.fill_details(items + extra)
             return items, extra, reports, secs
 
         def done(result):
@@ -476,7 +477,7 @@ class MainWindow(QMainWindow):
         else:
             box = st.ws.snap_box(st.doc_id, st.page, box)
         item = Item(st.doc_id, st.page, box, st.current_class, source="manual")
-        st.ws.fill_sizes([item])
+        st.ws.fill_details([item])
         st.add_items([item], "Add item")
         st.select([item.id])
 
@@ -596,7 +597,7 @@ class MainWindow(QMainWindow):
                 from ..core.detectors import OnnxDetector
 
                 found += _not_overlapping(st.ws.detect_with_model(OnnxDetector(model_dir), pages, progress), found)
-            st.ws.fill_sizes(found)
+            st.ws.fill_details(found)
             return found
 
         def done(found):
@@ -619,7 +620,7 @@ class MainWindow(QMainWindow):
             for it in found:
                 it.cls = example.cls
                 it.size_mm = None
-            st.ws.fill_sizes(found)
+            st.ws.fill_details(found)
             return found
 
         def done(found):
@@ -693,6 +694,33 @@ class MainWindow(QMainWindow):
         target.regions.append(Region(st.doc_id, st.page, [tuple(p) for p in points], closed))
         st.set_sections(secs, f"Draw region for {target.name}")
         self.statusBar().clearMessage()
+
+    def propose_sections(self) -> None:
+        st = self.state
+        pages = sorted({(i.doc, i.page) for i in st.project.items})
+        if not pages:
+            QMessageBox.information(self, "Spectra", "Find the items first; sections are traced between them.")
+            return
+
+        def work(progress):
+            st.ws.fill_tags([i for i in st.project.items if not i.tag])
+            return st.ws.propose_sections(pages, progress)
+
+        def done(result):
+            sections, before, after, n_bounds = result
+            if not sections:
+                QMessageBox.information(self, "Spectra", "No connected pipework with counted items was found.")
+                return
+            st.set_sections(st.project.sections + sections, f"Propose {len(sections)} section(s)", before, after)
+            QMessageBox.information(
+                self, "Spectra",
+                f"Proposed {len(sections)} sections on {len(pages)} page(s), split at {n_bounds} isolation valve(s).\n\n"
+                "Isolation valves themselves are left unassigned: assign each to the section your convention requires. "
+                "Sections continuing across off-page connectors appear once per sheet; give them the same name to merge "
+                "them in the results, and set line sizes where items have none.")
+            self.right.setCurrentWidget(self.sections_panel)
+
+        self.tasks.run("Tracing pipework", work, done)
 
     # --- Settings, reports, training --------------------------------------------------------------
 
