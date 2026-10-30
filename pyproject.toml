@@ -1,17 +1,25 @@
 [project]
-name = "2506p-spectra"
-version = "0.1.0"
-description = "PDF plan analyser: detects equipment, assigns it to sections and reports frequencies."
+name = "spectra"
+version = "2.0.0"
+description = "P&ID parts counting for QRA: vector symbol detection, Bluebeam import and IOGP 434-01 release frequencies."
 readme = "README.md"
 requires-python = ">=3.13"
+license = "MIT"
 dependencies = [
     "numpy>=2.4.6",
     "onnxruntime>=1.31.1",
     "openpyxl>=3.1.5",
+    "pillow>=13.0.0",
     "pypdf>=6.21.4",
     "pypdfium2>=5.14.0",
     "pyside6>=6.11.1",
 ]
+
+[project.scripts]
+spectra-cli = "spectra.cli:main"
+
+[project.gui-scripts]
+spectra = "spectra.gui.app:main"
 
 [dependency-groups]
 dev = [
@@ -27,3 +35,6 @@ packages = ["src/spectra"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120

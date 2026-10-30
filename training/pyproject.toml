@@ -1,0 +1,24 @@
+[project]
+name = "spectra-training"
+version = "1.0.0"
+description = "Train Spectra symbol detectors (RF-DETR, Apache-2.0) on a local NVIDIA GPU."
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "rfdetr[train,onnx]>=1.11",
+    "torch>=2.6",
+    "torchvision>=0.21",
+]
+
+# CUDA 12.8 builds of PyTorch for Windows and Linux. An RTX 3070 (Ampere,
+# compute capability 8.6) is supported by every CUDA 12 build.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchvision = [{ index = "pytorch-cu128" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv]
+package = false
