@@ -23,22 +23,26 @@ Then open the project in Spectra, look at a few pages and tell me whether boxes 
 
 On one drawing per client, after import, open the Results tab and count the "has no size" issues. If many items lack sizes, send three or four example line numbers as they appear on the drawing (text only, for example `6"-P-1001-A1A`). Say whether line numbers are selectable text in a PDF viewer; if they are not, they are SHX strokes.
 
-## 3. Frequency table basis
+## 3. Proposed sections
+
+On one reviewed study, run Sections > Propose sections from isolation valves and compare with the sections in your original study. Report how many proposed sections match, and the cause of any that do not: a missing valve tag, a pipe drawn straight through a valve, a crossing drawn as a join, or a line jump. If your clients use other tags for isolation valves, send the prefixes.
+
+## 4. Frequency table basis
 
 Confirm that the Steel Pipes rows in `src/spectra/assets/iogp_434-01_2019.csv` are per metre per year, and whether you count pipe length per section. Everything else is taken as correct, as you said.
 
-## 4. Conventions per client
+## 5. Conventions per client
 
 List any client whose conventions differ from the defaults: two flanged joints per valve, check valves as manual valves, relief valves as actuated valves, instrument connections in their own category with no implied flanges and a 25 mm tapping size. They can then ship as presets.
 
-## 5. Library detection on a fresh study
+## 6. Library detection on a fresh study
 
 Build a library from one reviewed past study (`spectra-cli build-library ... --name ClientA`), then on a new study from the same client run Detect, review, and send the status-bar figure "Kept unchanged: x % of n automatic", or the Training > Evaluate summary (two percentages and the per-class table).
 
-## 6. First training run
+## 7. First training run
 
 When you have about 100 reviewed sheets: export a dataset, train (docs/training.md) and send the last 30 lines of the training output plus the evaluation table on a client held out of training.
 
-## 7. Speed on your laptop
+## 8. Speed on your laptop
 
 Report the time to open your largest A0 sheet and to run Detect with a library on it. Above 10 s per sheet is worth a look.

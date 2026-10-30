@@ -14,6 +14,8 @@ CAD P&IDs are vector PDFs: every copy of a symbol is drawn with identical stroke
 | Bluebeam import | Turns past Bluebeam Count markups (type and size in the label) into snapped items, learns the symbols, and finds the ones left unmarked | Your marked-up PDFs |
 | Trained model (optional) | RF-DETR detector for drawing styles no library covers; proposals only | A dataset exported from Spectra and a local GPU |
 
+Tags are read from instrument bubbles and nearby text. Isolatable sections can be proposed by tracing the pipework and splitting it at tagged isolation valves (ESDV, SDV, XV, BDV and similar).
+
 Sizes come from the item, a class default (instrument tapping), the line number printed along the pipe, or the section's line size, in that order. Every number in the Excel report traces back to drawing, page and position.
 
 ## Install and run (Windows)
@@ -44,7 +46,8 @@ A stand-alone `Spectra.exe` can be built with `uv run --with nuitka build.bat`.
 src/spectra/
   core/        Qt-free engine: PDF access (pdfdoc), geometry, vectors and snapping,
                template matching, library, Bluebeam import, sizes and line numbers,
-               taxonomy, IOGP 434-01 frequencies, project files, reports,
+               tags, pipe network and sections, taxonomy, IOGP 434-01
+               frequencies, project files, reports,
                ONNX detector, dataset export, evaluation
   gui/         PySide6 application (light theme, Inter)
   cli.py       spectra-cli
@@ -56,7 +59,7 @@ tests/         pytest suite on synthetic CAD drawings (no client data)
 ## Development
 
 ```bash
-uv run pytest                  # 61 tests, about 5 s
+uv run pytest                  # 66 tests, about 5 s
 ```
 
 Tests generate their own synthetic P&IDs. Never commit client drawings, projects, datasets or models; `.gitignore` excludes them.

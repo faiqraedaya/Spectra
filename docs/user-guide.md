@@ -44,9 +44,14 @@ When every symbol on a page is correct, click **Mark page reviewed**. Reviewed p
 
 The status bar shows **Kept unchanged**: the share of automatic detections you accepted without changing class, box or size, counting deletions as changes. The target is 90 %.
 
-## 4. Sections and sizes
+## 4. Sections, tags and sizes
 
-- Sections tab > Add section, name it, give it a line size (mm) and, if you count pipework, a pipe length (m).
+- **Propose sections from isolation valves** (Sections tab): Spectra traces the pipework strokes, joining them where a line ends on another line or on a symbol (lines that merely cross are not joined), and splits the network at actuated valves whose tags mark them as isolation valves (ESDV, SDV, ESV, SSV, XV, EIV, BDV, HIPPS, ZV; change the list under Settings > Detection). Each connected part becomes a section named after the drawing, page and number. Then:
+  - check each section and rename it;
+  - give sections that continue across off-page connectors the same name, so the results add them together;
+  - assign each isolation valve to the section your convention requires (they are left unassigned on purpose).
+- Tags are read from the drawing text when items are added or detected: function letters and loop number inside an instrument bubble (PT over 1006 gives PT-1006), and the nearest tag text beside other symbols.
+- To draw sections by hand: Sections tab > Add section, name it, give it a line size (mm) and, if you count pipework, a pipe length (m).
 - Draw region (or S): click points along the pipework, double-click or Enter to finish. Close the shape back on its first point to make an area instead. Items the region touches (or, for an area, items inside it) belong to the section. An item can also be assigned explicitly in the inspector.
 - Size order: the item's own size; else the class default (instrument connections default to 25 mm, the tapping size); else the section's line size. Spectra fills missing item sizes from line numbers such as `6"-P-1001-A1A` or `150-HC-12345-B1A` printed along the pipe, and records which line number it used.
 
