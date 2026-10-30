@@ -31,6 +31,7 @@ from .vectors import PageVectors, snap_point
 
 FIELD_PRIORITY = ["Label", "Subj", "Contents"]
 FALLBACK_HALF = mm_to_pt(3.0)
+SKIP = "__skip__"  # mapping value for label types the user chose not to import
 
 
 @dataclass
@@ -101,7 +102,11 @@ def normalise_type(text: str) -> str:
 def parse_label(text: str, taxonomy: Taxonomy, mapping: dict[str, str] | None = None, bare_numbers: str = "auto") -> LabelInfo:
     size, rest = parse_size(text, bare_numbers)
     key = normalise_type(rest)
-    cls = (mapping or {}).get(key) or taxonomy.match_label(rest)
+    cls = (mapping or {}).get(key)
+    if cls == SKIP:
+        cls = None
+    elif not cls:
+        cls = taxonomy.match_label(rest)
     return LabelInfo(text, cls, size, key)
 
 

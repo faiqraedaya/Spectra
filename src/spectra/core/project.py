@@ -120,6 +120,7 @@ class Project:
     sections: list[Section] = field(default_factory=list)
     taxonomy: Taxonomy = field(default_factory=Taxonomy)
     settings: Settings = field(default_factory=Settings)
+    stats: dict = field(default_factory=dict)  # review statistics, e.g. auto detections rejected
     path: Path | None = None
 
     # --- Look-ups ---------------------------------------------------------
@@ -178,6 +179,7 @@ class Project:
             "sections": [s.to_dict() for s in self.sections],
             "taxonomy": self.taxonomy.to_list(),
             "settings": asdict(self.settings),
+            "stats": self.stats,
         }
 
     @classmethod
@@ -198,6 +200,7 @@ class Project:
             sections=[Section.from_dict(s) for s in data.get("sections", [])],
             taxonomy=Taxonomy.from_list(data["taxonomy"]) if data.get("taxonomy") else Taxonomy(),
             settings=settings,
+            stats=data.get("stats", {}),
         )
 
     def save(self, path: str | Path) -> None:
