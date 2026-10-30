@@ -189,11 +189,14 @@ def snap_point(
     comps = [c for c in comps if max(_extent(pv.bbox(c))) <= max_extent]
     if not comps:
         return None
+    thin = mm_to_pt(0.3)
     best: np.ndarray | None = None
     best_area = -1.0
     for c in comps:
         b = pv.bbox(c)
         w, h = _extent(b)
+        if min(w, h) < thin:
+            continue  # a lone straight stroke is part of a symbol, not a whole one
         if b[0] - 1 <= x <= b[2] + 1 and b[1] - 1 <= y <= b[3] + 1 and w * h > best_area:
             best, best_area = c, w * h
     if best is None:
@@ -204,14 +207,16 @@ def snap_point(
         if not nearest:
             return None
         best = nearest[0]
-        # A symbol made of separate parts (a flange's two bars): the click lies
-        # between two nearby clusters rather than on either.
+        # A symbol made of separate parts (a flange's two bars): the point lies
+        # between or beside two nearby clusters rather than inside either.
+        b0 = pv.bbox(best)
+        slack = mm_to_pt(1.5) if min(_extent(b0)) < thin else 0.0
         pair_area = None
         for other in nearest[1:4]:
             u = np.union1d(best, other)
             b = pv.bbox(u)
             w, h = _extent(b)
-            if b[0] <= x <= b[2] and b[1] <= y <= b[3] and max(w, h) <= mm_to_pt(12.0):
+            if b[0] - slack <= x <= b[2] + slack and b[1] - slack <= y <= b[3] + slack and max(w, h) <= mm_to_pt(12.0):
                 if pair_area is None or w * h < pair_area:
                     pair_area, chosen = w * h, u
         if pair_area is not None:

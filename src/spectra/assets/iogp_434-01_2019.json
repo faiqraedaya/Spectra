@@ -1,0 +1,11 @@
+{
+  "name": "IOGP 434-01 Process release frequencies",
+  "edition": "Version 3.0, September 2019",
+  "source": "https://www.iogp.org/bookstore/product/risk-assessment-data-directory-process-release-frequencies/",
+  "hole_bands_mm": ["1-3", "3-10", "10-50", "50-150", ">150"],
+  "units": {
+    "default": "per item per year",
+    "Steel Pipes": "per metre per year (assumed; confirm against the report)"
+  },
+  "notes": "Values carried over from Spectra 1.x frequency.csv. The owner confirmed this is the only data set to support; verify each row against the published tables before issuing a study."
+}
