@@ -53,3 +53,14 @@ def test_template_signature_ignores_orientation(synthetic):
         if box is not None:
             sigs.add(Template.from_page(pv, idx, box).signature())
     assert len(sigs) == 1
+
+
+def test_matching_is_independent_of_chunk_size(synthetic):
+    drawing, pdf = synthetic
+    pv = PageVectors(pdf.vectors(0))
+    ex = next(t for t in drawing.truth if t.page == 0 and t.symbol == "flange")
+    box, idx = snap_point(pv, *centre(ex.box))
+    tpl = Template.from_page(pv, idx, box)
+    big = find_matches(tpl, pv)
+    small = find_matches(tpl, pv, chunk=3)
+    assert [m.box for m in big] == [m.box for m in small] and len(big) > 5

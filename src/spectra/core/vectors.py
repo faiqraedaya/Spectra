@@ -59,18 +59,19 @@ class PageVectors:
         )
 
     def endpoint_keys(self, q: float) -> np.ndarray:
-        """Sorted unique quantised endpoint keys, for fast template checks."""
+        """Sorted quantised endpoint keys, dilated by one cell in each direction.
+
+        A point within about one cell of any stroke endpoint has its own key
+        in this set, so template checks need one look-up per point.
+        """
         if self._keys is None or self._key_q != q:
             pts = np.concatenate([self.s[:, :2], self.s[:, 2:]])
-            self._keys = np.unique(_quant_keys(pts, q))
+            ix = np.round(pts[:, 0] / q).astype(np.int64)
+            iy = np.round(pts[:, 1] / q).astype(np.int64)
+            dil = [((ix + dx) << 32) + ((iy + dy) & 0xFFFFFFFF) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+            self._keys = np.unique(np.concatenate(dil))
             self._key_q = q
         return self._keys
-
-
-def _quant_keys(pts: np.ndarray, q: float) -> np.ndarray:
-    ix = np.round(pts[..., 0] / q).astype(np.int64)
-    iy = np.round(pts[..., 1] / q).astype(np.int64)
-    return (ix << 32) + (iy & 0xFFFFFFFF)
 
 
 def point_segment_distance(px: np.ndarray, py: np.ndarray, segs: np.ndarray) -> np.ndarray:

@@ -99,7 +99,7 @@ def find_matches(
     min_score: float = 0.9,
     min_precision: float = 0.9,
     tol: float = 0.6,
-    max_hypotheses: int = 200_000,
+    chunk: int = 4096,
 ) -> list[Match]:
     """All placements of tpl on the page with at least min_score of its stroke length found."""
     if len(tpl.segs) == 0 or len(pv) == 0:
@@ -115,12 +115,11 @@ def find_matches(
     counts = [int(np.count_nonzero(np.abs(pv.length - lengths[k]) <= tol)) for k in order]
     a = int(order[int(np.argmin(counts))])
     cand = np.flatnonzero(np.abs(pv.length - lengths[a]) <= tol)
-    if not len(cand) or len(cand) * 16 > max_hypotheses:
+    if not len(cand):
         return []
 
     ta0, ta1 = tpl.segs[a, :2], tpl.segs[a, 2:]
     page_keys = pv.endpoint_keys(0.5)
-    offs = np.array([(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)], dtype=np.float64) * 0.5
 
     hyps_t: list[np.ndarray] = []
     hyps_m: list[int] = []
@@ -145,22 +144,27 @@ def find_matches(
 
     results: list[Match] = []
     for mi in np.unique(M):
-        sel = M == mi
-        t = T[sel]  # (H, 2)
         m = DIHEDRAL[mi]
         p0 = tpl.segs[:, :2] @ m.T  # (S, 2)
         p1 = tpl.segs[:, 2:] @ m.T
-        found = np.ones((len(t), len(p0)), dtype=bool)
-        for p in (p0, p1):
-            pts = p[None, :, :] + t[:, None, :]  # (H, S, 2)
-            hit = np.zeros(pts.shape[:2], dtype=bool)
-            for o in offs:
-                keys = _keys(pts + o)
-                pos = np.searchsorted(page_keys, keys)
-                pos = np.clip(pos, 0, len(page_keys) - 1)
-                hit |= page_keys[pos] == keys
-            found &= hit
-        recall = (found * lengths[None, :]).sum(axis=1) / total
+        all_t = T[M == mi]
+        recall_parts = []
+        # Chunks bound memory on dense pages (many strokes share the anchor length).
+        for start in range(0, len(all_t), chunk):
+            t = all_t[start : start + chunk]  # (H, 2)
+            # Quick rejection on the longest strokes first: most placements
+            # suggested by an anchor of common length fail here.
+            quick = order[: min(4, len(order))]
+            qhit = _hits(page_keys, p0[quick], t) & _hits(page_keys, p1[quick], t)
+            possible = (qhit * lengths[quick][None, :]).sum(axis=1) + (total - lengths[quick].sum()) >= min_score * total
+            rec = np.zeros(len(t))
+            if possible.any():
+                tt = t[possible]
+                found = _hits(page_keys, p0, tt) & _hits(page_keys, p1, tt)
+                rec[possible] = (found * lengths[None, :]).sum(axis=1) / total
+            recall_parts.append(rec)
+        recall = np.concatenate(recall_parts)
+        t = all_t
         good = np.flatnonzero(recall >= min_score)
         hw, hh = np.abs(m @ np.array(tpl.half))
         for g in good:
@@ -263,6 +267,13 @@ def match_library(
         if all(ios(m.box, k.box) < 0.6 for k in kept):
             kept.append(m)
     return kept
+
+
+def _hits(page_keys: np.ndarray, pts: np.ndarray, t: np.ndarray) -> np.ndarray:
+    """(H, S) mask: template points pts (S, 2) placed at offsets t (H, 2) land on a stroke endpoint."""
+    keys = _keys(pts[None, :, :] + t[:, None, :])
+    pos = np.clip(np.searchsorted(page_keys, keys), 0, len(page_keys) - 1)
+    return page_keys[pos] == keys
 
 
 def _keys(pts: np.ndarray) -> np.ndarray:

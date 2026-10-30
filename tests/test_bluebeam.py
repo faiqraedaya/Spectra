@@ -63,3 +63,24 @@ def test_reconcile_counts_against_markups_csv(synthetic):
         labels[i.meta["label"]] = labels.get(i.meta["label"], 0) + 1
     rows = [{"Subject": "Count", "Label": k, "Count": str(v)} for k, v in labels.items()]
     assert all(exp == got for _, exp, got in reconcile_with_csv(rows, items))
+
+
+def test_shape_drawn_round_a_symbol_snaps_to_the_strokes_inside(tmp_path):
+    from spectra.core.pdfdoc import PdfDoc
+    from spectra.core.pdfwriter import PdfWriter
+    from spectra.core.synthetic import draw_symbol
+
+    w = PdfWriter()
+    p = w.new_page(600, 400)
+    p.line(50, 200, 285, 200)
+    truth = draw_symbol(p, "gate_valve", 300, 200)
+    p.line(315, 200, 550, 200)
+    # an off-centre circle round the valve, as an engineer might draw it
+    p.annotation({"Subtype": "/Circle", "Rect": p.rect_to_pdf(285, 182, 322, 214), "Subj": "Circle", "Label": "Gate valve 4in"})
+    path = tmp_path / "shape.pdf"
+    w.save(path)
+    with PdfDoc(path) as pdf:
+        project = _project(pdf)
+        items, report = import_markups(project, "d1", pdf)
+    assert report.added == 1
+    assert iou(items[0].box, truth) > 0.95 and items[0].cls == "manual_valve" and items[0].size_mm == 100

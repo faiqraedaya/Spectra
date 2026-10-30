@@ -27,10 +27,12 @@ from .pdfdoc import PdfDoc
 from .project import Item, Project, Region, Section
 from .sizes import parse_size
 from .taxonomy import Taxonomy
-from .vectors import PageVectors, snap_point
+from .vectors import PageVectors, snap_box, snap_point
 
 FIELD_PRIORITY = ["Label", "Subj", "Contents"]
 FALLBACK_HALF = mm_to_pt(3.0)
+SHAPE_SUBTYPES = ("Circle", "Square", "Stamp")
+MAX_SHAPE = mm_to_pt(40.0)  # larger shapes are areas, not single items
 SKIP = "__skip__"  # mapping value for label types the user chose not to import
 
 
@@ -41,6 +43,7 @@ class MarkupPoint:
     y: float
     fields: dict[str, str]
     annotation: Annotation
+    shape: tuple[float, float, float, float] | None = None  # display box of a shape drawn round the item
 
 
 @dataclass
@@ -89,9 +92,14 @@ def markup_points(pdf: PdfDoc, pages: list[int] | None = None) -> list[MarkupPoi
             fields = a.candidate_labels()
             if not fields:
                 continue
+            shape = None
+            if not a.is_count and a.subtype in SHAPE_SUBTYPES:
+                b = geom.box_to_display(a.rect)
+                if max(b[2] - b[0], b[3] - b[1]) <= MAX_SHAPE:
+                    shape = b
             for ux, uy in a.points():
                 xs, ys = geom.to_display(ux, uy)
-                out.append(MarkupPoint(page, float(xs), float(ys), fields, a))
+                out.append(MarkupPoint(page, float(xs), float(ys), fields, a, shape))
     return out
 
 
@@ -166,7 +174,13 @@ def import_markups(
             continue
         if p.page not in vectors:
             vectors[p.page] = PageVectors(pdf.vectors(p.page))
-        snapped = snap_point(vectors[p.page], p.x, p.y)
+        snapped = None
+        if p.shape is not None:  # a circle or box drawn round the symbol
+            inside = snap_box(vectors[p.page], p.shape, margin=mm_to_pt(1.0))
+            if inside is not None and len(inside[1]) >= 2:
+                snapped = inside
+        if snapped is None:
+            snapped = snap_point(vectors[p.page], p.x, p.y)
         if snapped is not None:
             box = snapped[0]
             report.snapped += 1
