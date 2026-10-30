@@ -7,6 +7,18 @@
 | Scope | Whole repository and its git history. No code was changed. |
 | Licence and source checks | Licence files fetched from GitHub on the review date. arXiv, Zenodo, gnu.org and ultralytics.com could not be reached from the review environment, so claims that depend on them are marked. |
 
+> **Update, later on 30 October 2026: decisions taken and Spectra 2.0 built.** The review below is kept as written. Your answers to its open questions changed the plan; this note records how. Commit references are on branch `claude/spectra-v2`.
+>
+> **Decisions.** Q1: the `test/` files were removed from every commit and the history force-pushed (ask GitHub Support to purge cached views of the old commits, since GitHub can still serve them by hash). Q2: all drawings are CAD vector PDFs, with real text or SHX. Q3: training happens on your RTX 3070 laptop. Q4: local training on client drawings is allowed. Q5 and Q6: permissive licences only, internal use. Q7: IOGP 434-01 (2019) only. Q8: two flanges per valve, check valves as manual valves, relief valves as actuated valves, instrument connections in their own category. Q9: hundreds of pages of Bluebeam point markups exist. Q10: Roboflow dropped. Q12: "reliable" means 90 % of detections need no edit.
+>
+> **What changed in the plan.**
+> 1. *Vector-first detection replaces ML as the main engine.* With 100 % CAD vector drawings, every copy of a symbol is drawn with identical strokes. Spectra 2.0 snaps clicks to symbol strokes and matches symbol templates under the 8 right-angle rotations and mirror images. On the synthetic test set this is exact (every symbol found, no wrong matches); on a dense A0 test sheet (111,000 strokes) an 11-symbol library runs in about 3 s. A trained model (RF-DETR, section 2) remains, for drawing styles no library covers.
+> 2. *Bluebeam markups become the dataset.* Count markups store one vertex per counted item in the PDF (`/Vertices`), with type and size in `/Label`. Spectra imports them, snaps each point to the symbol under it to get an exact box, builds symbol templates from them and proposes the symbols left unmarked. That turns past studies into libraries and training labels without re-annotating.
+> 3. *PyMuPDF replaced* by pypdfium2 (Apache-2.0/BSD-3) and pypdf (BSD-3), following the permissive-only decision. Ultralytics is not used.
+> 4. *The 1.x code was replaced*, not repaired. Defects D1 to D18 are gone by construction: geometry is stored in display-space PDF points, items have stable IDs, edits are undoable commands, sections are page-aware, the frequency look-up uses continuous bands and reports what it cannot cost, and the API key and temp PNGs no longer exist.
+>
+> **Roadmap status.** Phase 1 (local detection with an annotation loop) is delivered and goes further than planned: vector snapping, find similar, libraries, Bluebeam import, review workflow, dataset export, evaluation, the training project and the Excel report. Phase 2 (dataset growth) now depends on your data, per [data-requests.md](data-requests.md). Phase 3 is partly delivered: line numbers are read from the text layer (and AutoCAD SHX comments) to size items; OCR for SHX strokes is not done. Phases 4 and 5 (line tracing, graph, automatic isolatable sections) are not started; sections are drawn as regions for now.
+
 ## How to read this document
 
 Each claim carries one of these labels where it matters:

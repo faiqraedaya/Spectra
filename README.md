@@ -1,113 +1,80 @@
 # Spectra
 
-<p align="center">
-  <img src="spectra/analyser/assets/images/spectra_splash.png" alt="Spectra Logo" />
-</p>
-<p style="text-align:center;"></p>
+P&ID parts counting for quantitative risk assessment (QRA). Spectra finds valves, flanges, instruments and equipment on CAD P&IDs, lets you review them quickly, groups them into isolatable sections and calculates release frequencies by hole size from IOGP Report 434-01 (2019). It runs entirely offline; no drawing leaves the machine.
 
-<p align="center">
-   <i>
-      Smart Parts Evaluation &amp; Counting Tool for Risk Assessments
-   </i>
-</p>
+## How it detects symbols
 
-## Overview 
+CAD P&IDs are vector PDFs: every copy of a symbol is drawn with identical strokes. Spectra uses that directly.
 
-A P&ID analysis application for detecting and categorizing objects using deep learning models via Roboflow API (local YOLO model support incoming).
+| Engine | What it does | Needs |
+|---|---|---|
+| Snap | Click a symbol and the box fits its strokes exactly | Nothing |
+| Find similar | One example finds every copy across the drawing set, at any right-angle rotation or mirrored | One example |
+| Symbol library | Reusable per-client templates; detects all known symbols in seconds per sheet | Built from reviewed items or Bluebeam markups |
+| Bluebeam import | Turns past Bluebeam Count markups (type and size in the label) into snapped items, learns the symbols, and finds the ones left unmarked | Your marked-up PDFs |
+| Trained model (optional) | RF-DETR detector for drawing styles no library covers; proposals only | A dataset exported from Spectra and a local GPU |
 
-Built with PySide6 for an intuitive GUI, allowing easy editing and navigation of PDFs, automatic or manual object additions, live results updates, and robust import/export functionality.
+Sizes come from the item, a class default (instrument tapping), the line number printed along the pipe, or the section's line size, in that order. Every number in the Excel report traces back to drawing, page and position.
 
-Designed to automate the "Parts Count" methodology for frequency analysis in Quantitative Risk Assessments: a tedious, time-consuming and laborous task.
+## Install and run (Windows)
 
-## Features
+1. Install [uv](https://docs.astral.sh/uv/).
+2. In the repository folder:
 
-- **PDF Analysis**: Load and analyse PDF documents
-- **Object Detection & Addition**: Detect objects using Roboflow API or add manually
-- **Section Management**: Assign and organise objects by sections
-- **Section Drawing**: Draw sections directly on PDF as polylines with interactive tools
-- **Frequency Analysis**: Calculate object frequencies by hole size categories
-- **Export Results**: Export analysis results to CSV (more export options soon)
-
-## Requirements 
-- Python 3.7+
-- PySide6
-- Roboflow
-- Pillow
-- PyMuPDF
-
-## Install
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/faiqraedaya/Spectra
-   cd "Spectra"
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Set up Roboflow API key:
-
-   On Windows:
-   ```bash
-   set ROBOFLOW_API_KEY=your_api_key_here
-   ```
-
-   On Linux:
-   ```bash:
-   export ROBOFLOW_API_KEY=your_api_key_here
-   ```
-
-## Usage 
-
-1. Launch the application:
-   ```bash
-   python run_spectra.py
-   ```
-
-   Or, to run directly as a module:
-   ```bash
-   python -m spectra.analyser.main
-   ```
-
-## Project Structure
-
-The codebase is organized into logical modules:
-- **Core**: Main application logic and window management
-- **UI**: All user interface components
-- **Detection**: Object detection and categorization
-- **Sections**: Section management and filtering
-- **Utils**: Helper functions and calculations
-- **Config**: Centralized configuration management 
-
-```
-spectra/analyser/
-├── assets/                 # Static assets
-│   ├── images/            # Image files (splash screens, icons)
-│   └── data/              # Data files (CSV, configuration)
-├── core/                  # Core application logic
-│   ├── app.py            # Main application entry point
-│   └── main_window.py    # Main window implementation
-├── ui/                    # User interface components
-│   ├── pdf_viewer.py     # PDF viewing and annotation
-│   ├── dialogs/          # Dialog windows
-│   └── widgets/          # Custom widget components
-├── detection/             # Object detection functionality
-│   ├── types.py          # Detection data types
-│   ├── categories_map.py # Category mapping logic
-│   └── roboflow.py       # Roboflow API integration
-├── sections/              # Section management
-│   └── sections.py       # Section data and operations
-├── utils/                 # Utility functions
-│   └── frequency.py      # Frequency calculations
-├── config/                # Configuration and settings
-│   └── settings.py       # Application settings
-├── main.py               # Application entry point
-└── run_analyser.py       # Shortcut launcher (recommended)
+```bash
+uv sync
+uv run spectra                 # the application
+uv run spectra-cli --help      # batch tools: Bluebeam import, libraries, datasets, evaluation, reports
 ```
 
-## License
+Try it without client data: Help > Open demo drawing (a synthetic P&ID with Bluebeam-style markups).
 
-This project is provided under the MIT License.
+A stand-alone `Spectra.exe` can be built with `uv run --with nuitka build.bat`.
+
+## Documentation
+
+- [User guide](docs/user-guide.md): workflows, review keys, sections, conventions, reports.
+- [Training a model](docs/training.md): dataset export and training on a local NVIDIA GPU.
+- [Data requests](docs/data-requests.md): what to run on your drawings and report back.
+- [Technical review and plan](docs/spectra-review.md): the October 2026 review, and what changed after it.
+
+## Project layout
+
+```
+src/spectra/
+  core/        Qt-free engine: PDF access (pdfdoc), geometry, vectors and snapping,
+               template matching, library, Bluebeam import, sizes and line numbers,
+               taxonomy, IOGP 434-01 frequencies, project files, reports,
+               ONNX detector, dataset export, evaluation
+  gui/         PySide6 application (light theme, Inter)
+  cli.py       spectra-cli
+  assets/      IOGP 434-01 table (CSV plus a JSON note of source and units), icon
+training/      separate uv project: RF-DETR training for a local GPU
+tests/         pytest suite on synthetic CAD drawings (no client data)
+```
+
+## Development
+
+```bash
+uv run pytest                  # 61 tests, about 5 s
+```
+
+Tests generate their own synthetic P&IDs. Never commit client drawings, projects, datasets or models; `.gitignore` excludes them.
+
+## Licences
+
+Spectra is MIT. Everything it ships with is permissive or weak copyleft, chosen so internal use needs no commercial licence:
+
+| Component | Licence |
+|---|---|
+| PDFium via pypdfium2 | Apache-2.0 / BSD-3-Clause |
+| pypdf | BSD-3-Clause |
+| NumPy | BSD-3-Clause |
+| ONNX Runtime | MIT |
+| openpyxl | MIT |
+| Pillow | MIT-CMU |
+| PySide6 (Qt) | LGPL-3.0, dynamically linked |
+| Inter font | SIL OFL 1.1 |
+| RF-DETR and PyTorch (training only, separate environment) | Apache-2.0, BSD-3-Clause |
+
+Spectra 1.x used PyMuPDF and the Roboflow cloud API; both are gone. PyMuPDF and Ultralytics YOLO are AGPL-3.0 and are deliberately not used.

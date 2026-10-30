@@ -65,6 +65,8 @@ class BluebeamDialog(QDialog):
         theme.style_table(self.table)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.table.horizontalHeader().resizeSection(2, 220)
         lay.addWidget(self.table, 1)
 
         self.regions = QCheckBox("Import polyline and polygon markups as section regions")
@@ -145,8 +147,8 @@ class DetectDialog(QDialog):
         self.scope.setCurrentIndex(int(s.value("detect/scope", 1)))
         form.addRow("Pages", self.scope)
         lay.addLayout(form)
-        lay.addWidget(_caption("The library finds exact copies of known symbols in CAD drawings in well under a second "
-                               "per page. A trained model also finds symbols in styles the library has not seen; its "
+        lay.addWidget(_caption("The library finds exact copies of known symbols in CAD drawings within seconds "
+                               "per sheet. A trained model also finds symbols in styles the library has not seen; its "
                                "results arrive as proposals to review. Existing items are never duplicated."))
         lay.addWidget(_buttons(self, "Detect"))
 
@@ -170,7 +172,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent, project, categories: list[str]):
         super().__init__(parent)
         self.setWindowTitle("Spectra — Classes and conventions")
-        self.setMinimumSize(760, 560)
+        self.setMinimumSize(880, 560)
         self.project = project
         lay = theme.apply_layout(QVBoxLayout(self), T.WINDOW_MARGIN, T.ROW_SPACING)
         tabs = QTabWidget()
@@ -182,9 +184,13 @@ class SettingsDialog(QDialog):
                               "(your usual convention is two per valve). A default size overrides the section's line "
                               "size, for example the tapping size of instrument connections."))
         self.table = QTableWidget(len(project.taxonomy), 5)
-        self.table.setHorizontalHeaderLabels(["Class", "IOGP 434-01 category", "Implied flanged joints", "Default size (mm)", "Key"])
+        self.table.setHorizontalHeaderLabels(["Class", "IOGP 434-01 category", "Flanges per item", "Default size (mm)", "Key"])
         theme.style_table(self.table)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for col, width in ((0, 210), (2, 130), (3, 140), (4, 64)):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            header.resizeSection(col, width)
         self.rows = []
         for r, c in enumerate(project.taxonomy):
             self.table.setItem(r, 0, QTableWidgetItem(c.name))
